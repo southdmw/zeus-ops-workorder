@@ -3,6 +3,7 @@ import com.alibaba.fastjson.JSON;
 import com.gdu.zeus.ops.workorder.data.AIAlgorithm;
 import com.gdu.zeus.ops.workorder.data.PatrolOrder;
 import com.gdu.zeus.ops.workorder.data.enums.ExecutionType;
+import com.gdu.zeus.ops.workorder.data.enums.OrderType;
 import com.gdu.zeus.ops.workorder.data.enums.PatrolResult;
 import com.gdu.zeus.ops.workorder.repository.AIAlgorithmRepository;
 import org.springframework.ai.document.Document;
@@ -26,8 +27,6 @@ public class PatrolOrderTools {
 
     private static final DateTimeFormatter CUSTOM_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
-//    private static final Pattern CONSENT_PATTERN = Pattern.compile(".*(同意|确认|是的|可以|好的).*", Pattern.CASE_INSENSITIVE);
-
     @Autowired
     private PatrolOrderService patrolOrderService;
 
@@ -42,60 +41,69 @@ public class PatrolOrderTools {
 
     @Autowired
     private RouteService routeService;
+    
+    @Autowired
+    private POIService poiService;
 
-    /*@Tool(description = "搜索AI算法推荐")
-    public List<String> searchAIAlgorithms(String keyword) {
-        logger.info("搜索AI算法，关键词: {}", keyword);
-        return aiAlgorithmService.searchAlgorithms(keyword);
-    }*/
-
-    @Tool(description = "查询可用航线")
-    public List<String> getAvailableRoutes(String area) {
-        logger.info("查询航线，区域: {}", area);
-        return routeService.getRoutesByArea(area);
+    @Tool(description = "根据巡查区域获取具体位置列表，用于让用户选择具体位置")
+    public List<String> getPOILocationsByArea(String area) {
+        logger.info("查询POI位置，区域: {}", area);
+        return poiService.getLocationsByArea(area);
     }
 
-    @Tool(description = "创建巡查工单")
-    public PatrolOrder createPatrolOrder(
+    @Tool(description = "根据用户选择的具体位置获取该位置的可用航线列表")
+    public List<String> getAvailableRoutesByLocation(String location) {
+        logger.info("查询航线，位置: {}", location);
+        return routeService.getRoutesByLocation(location);
+    }
+
+    @Tool(description = "创建日常巡查工单。注意：必须在用户明确同意后才能调用此函数，未经用户确认严禁调用")
+    public PatrolOrder createDailyInspectionOrder(
+            String orderType,
             String orderName,
-            String patrolArea,
-            String patrolTarget,
-            String executionTime,
-            String aiAlgorithm,
-            String executionRoute,
+            String patrolResults,
             String description,
-            String patrolResult,
-            String executionType){
-        logger.info("创建巡查工单: {}", orderName);
-        logger.info("巡查结果类型: {}", patrolResult);
+            String selectedLocation,
+            String executionRoute,
+            String executionType,
+            String executionTime,
+            String executionTimes,
+            String customExecutionDesc){
+        logger.info("创建日常巡查工单: {}", orderName);
+        logger.info("工单性质: {}", orderType);
+        logger.info("巡查结果类型: {}", patrolResults);
         logger.info("执行类型: {}", executionType);
-//        logger.info("用户同意状态: {}", userConsent);
-        // 检查用户同意
-        /*if (!confirmUserConsent(userConsent)) {
-            throw new IllegalArgumentException("用户未同意创建工单，操作已取消");
-        }*/
-        // 处理执行类型的映射
-        // 处理巡查结果类型映射
-        PatrolResult mappedPatrolResult = mapPatrolResult(patrolResult);
-        // 处理执行类型映射
+        logger.info("选择的位置: {}", selectedLocation);
+        
+        OrderType mappedOrderType = mapOrderType(orderType);
         ExecutionType mappedExecutionType = mapExecutionType(executionType);
+        
         PatrolOrder order = null;
         try {
+            LocalDateTime parsedExecutionTime = null;
+            if (executionTime != null && !executionTime.isEmpty()) {
+                parsedExecutionTime = parseExecutionTime(executionTime);
+            }
+            
             order = new PatrolOrder(
+                    mappedOrderType,
                     orderName,
-                    patrolArea,
-                    patrolTarget,
-                    parseExecutionTime(executionTime),
-                    aiAlgorithm,
+                    selectedLocation,
+                    "",
+                    parsedExecutionTime,
+                    executionTimes,
+                    customExecutionDesc,
+                    "",
                     executionRoute,
                     description,
-                    mappedPatrolResult,
+                    selectedLocation,
+                    patrolResults,
                     mappedExecutionType
             );
 
         } catch (IllegalArgumentException e) {
             logger.error("非法的枚举值: {}", e.getMessage());
-            throw new RuntimeException("枚举参数错误"); // 自定义异常
+            throw new RuntimeException("枚举参数错误: " + e.getMessage());
         }
         return patrolOrderService.createOrder(order);
     }
@@ -103,11 +111,8 @@ public class PatrolOrderTools {
     @Tool(description = "按场景搜索算法")
     public List<String> searchAIAlgorithmsWithRAG(String keyword) {
         logger.info("使用RAG搜索AI算法，关键词: {}", keyword);
-        // 使用向量搜索查找相关算法
         List<Document> similarDocs = vectorStore.similaritySearch(keyword);
-        // 提取算法名称
         List<String> list = similarDocs.stream()
-//                .filter(doc -> doc.getScore() > 0.7)
                 .map(doc -> doc.getMetadata().get("algorithmName").toString())
                 .distinct().collect(Collectors.toList());
         logger.info("返回的RAG结果: {}", JSON.toJSONString(list));
@@ -120,16 +125,9 @@ public class PatrolOrderTools {
         return algorithmRepository.findByAlgorithmName(algorithmName)
                 .orElse(null);
     }
-    /*@Tool(description = "确认用户同意创建工单")
-    public boolean confirmUserConsent(String userResponse) {
-        logger.info("用户响应: {}", userResponse);
-        boolean agreed = CONSENT_PATTERN.matcher(userResponse.trim()).matches();
-        logger.info("用户同意状态: {}", agreed);
-        return agreed;
-    }*/
 
     private PatrolResult mapPatrolResult(String patrolResult) {
-        if (patrolResult == null) return PatrolResult.PHOTO; // 默认照片
+        if (patrolResult == null) return PatrolResult.PHOTO;
 
         String normalized = patrolResult.trim().toLowerCase();
         switch (normalized) {
@@ -152,7 +150,7 @@ public class PatrolOrderTools {
             return LocalDateTime.parse(timeStr, CUSTOM_FORMATTER);
         } catch (Exception e) {
             logger.warn("时间解析失败: {}, 使用当前时间", timeStr);
-            return LocalDateTime.now().plusHours(1); // 默认1小时后执行
+            return LocalDateTime.now().plusHours(1);
         }
     }
 
@@ -176,6 +174,37 @@ public class PatrolOrderTools {
             default:
                 logger.warn("未知的执行类型: {}, 使用默认值 SINGLE", executionType);
                 return ExecutionType.SINGLE;
+        }
+    }
+    
+    private OrderType mapOrderType(String orderType) {
+        if (orderType == null) {
+            throw new IllegalArgumentException("工单性质不能为空");
+        }
+
+        String normalized = orderType.trim();
+        switch (normalized) {
+            case "违法建设巡查":
+            case "违法建设":
+                return OrderType.ILLEGAL_CONSTRUCTION;
+            case "空中巡查":
+                return OrderType.AERIAL_PATROL;
+            case "护林防火":
+                return OrderType.FOREST_FIRE_PREVENTION;
+            case "大气探测":
+                return OrderType.ATMOSPHERIC_DETECTION;
+            case "航空摄影":
+                return OrderType.AERIAL_PHOTOGRAPHY;
+            case "空中拍照":
+                return OrderType.AERIAL_PHOTO;
+            case "测绘":
+                return OrderType.SURVEYING;
+            case "其他":
+            case "其它":
+                return OrderType.OTHER;
+            default:
+                logger.warn("未知的工单性质: {}", orderType);
+                throw new IllegalArgumentException("未知的工单性质: " + orderType);
         }
     }
 }
