@@ -2,6 +2,7 @@ package com.gdu.zeus.ops.workorder.data;
 
 import com.gdu.zeus.ops.workorder.data.enums.ExecutionType;
 import com.gdu.zeus.ops.workorder.data.enums.OrderStatus;
+import com.gdu.zeus.ops.workorder.data.enums.OrderType;
 import com.gdu.zeus.ops.workorder.data.enums.PatrolResult;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
@@ -20,21 +21,29 @@ public class PatrolOrder {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    private String orderName; // 任务名称
-    private String patrolArea; // 巡查区域
-    private String patrolTarget; // 巡查目标
-    private LocalDateTime executionTime; // 执行时间
-    private String aiAlgorithm; // AI算法
-    private String executionRoute; // 执行航线
-    private String description; // 工单描述
+    @Enumerated(EnumType.STRING)
+    private OrderType orderType;
+
+    private String orderName;
+    private String patrolArea;
+    private String patrolTarget;
+    private LocalDateTime executionTime;
+    private String executionTimes;
+    private String customExecutionDesc;
+    private String aiAlgorithm;
+    private String executionRoute;
+    private String description;
+    private String selectedLocation;
 
     @Enumerated(EnumType.STRING)
-    private PatrolResult patrolResult; // 巡查结果 - 创建时指定
+    private PatrolResult patrolResult;
     @Transient
     private String patrolResultDesc;
+    
+    private String patrolResults;
 
     @Enumerated(EnumType.STRING)
-    private ExecutionType executionType; // 执行方式
+    private ExecutionType executionType;
     @Transient
     private String executionTypeDesc;
 
@@ -42,20 +51,23 @@ public class PatrolOrder {
     private OrderStatus status = OrderStatus.CREATED;
     @Transient
     private String statusDesc;
-    // 构造函数
-    public PatrolOrder(String orderName, String patrolArea, String patrolTarget,
-                       LocalDateTime executionTime, String aiAlgorithm, String executionRoute,
-                       String description, PatrolResult patrolResult, ExecutionType executionType) {
+    
+    public PatrolOrder(OrderType orderType, String orderName, String patrolArea, String patrolTarget,
+                       LocalDateTime executionTime, String executionTimes, String customExecutionDesc,
+                       String aiAlgorithm, String executionRoute, String description, 
+                       String selectedLocation, String patrolResults, ExecutionType executionType) {
+        this.orderType = orderType;
         this.orderName = orderName;
         this.patrolArea = patrolArea;
         this.patrolTarget = patrolTarget;
         this.executionTime = executionTime;
+        this.executionTimes = executionTimes;
+        this.customExecutionDesc = customExecutionDesc;
         this.aiAlgorithm = aiAlgorithm;
         this.executionRoute = executionRoute;
         this.description = description;
-        this.patrolResult = patrolResult; // 创建时指定
+        this.selectedLocation = selectedLocation;
+        this.patrolResults = patrolResults;
         this.executionType = executionType;
     }
 }
-
-
