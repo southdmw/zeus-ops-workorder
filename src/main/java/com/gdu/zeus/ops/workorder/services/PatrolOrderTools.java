@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -42,33 +43,64 @@ public class PatrolOrderTools {
 //        return poiService.getLocationsByArea(area);
 //    }
 
-    @Tool(description = "根据巡查区域获取具体POI位置列表，供用户选择")
-    public List<POILocationInfo> getPOILocations(String area) {
+    @Tool(description = "根据巡查区域获取具体POI位置列表,供用户选择。若返回空列表,需提示用户重新确定巡查区域")
+    public List<POILocationInfo> getPOILocations(@ToolParam(description = "巡查区域名称,如:光谷广场") String area) {
         logger.info("查询POI位置，区域: {}", area);
-        List<WorkOrderApiDto.POILocationResponse> responses = poiService.getLocationsByArea(area);
+        try {
+            List<WorkOrderApiDto.POILocationResponse> responses = poiService.getLocationsByArea(area);
+            // 检查返回是否为空
+            if (responses == null || responses.isEmpty()) {
+                logger.warn("未查询到巡查区域的POI位置: {}", area);
+                return Collections.emptyList();
+            }
+            // 转换为包含完整信息的对象
+            List<POILocationInfo> result = responses.stream()
+                    .map(poi -> new POILocationInfo(
+                            poi.getName(),
+                            poi.getX(),  // 经度
+                            poi.getY(),  // 纬度
+                            poi.getAddress()
+                    ))
+                    .collect(Collectors.toList());
 
-        // 转换为包含完整信息的对象
-        return responses.stream()
-                .map(poi -> new POILocationInfo(
-                        poi.getName(),
-                        poi.getX(),  // 经度
-                        poi.getY(),  // 纬度
-                        poi.getAddress()
-                ))
-                .collect(Collectors.toList());
+            logger.info("查询到{}个POI位置", result.size());
+            return result;
+        } catch (Exception e) {
+            logger.error("查询POI位置异常,区域: {}", area, e);
+            return Collections.emptyList();
+        }
     }
 
     /**
      * 根据具体位置获取可用航线
      */
-    @Tool(description = "根据具体位置获取可用航线列表，供用户选择")
+    @Tool(description = "根据具体位置获取可用航线列表,供用户选择。若返回空列表,需提示用户重新选择具体位置或重新确认巡查区域")
     public List<WorkOrderApiDto.RouteResponseVo> getAvailableRoutes(
             @ToolParam(description = "具体位置名称")String name,
             @ToolParam(description = "具体位置经度")Double x,
             @ToolParam(description = "具体位置纬度")Double y,
             @ToolParam(description = "搜索半径，单位：米，默认2000")Double radius) {
-        logger.info("查询航线，位置: {}", name);
-        return routeService.getRoutesByLocation(name, x, y, radius);
+        logger.info("查询航线,位置: {}, 经度: {}, 纬度: {}, 半径: {}米", name, x, y, radius);
+        // 设置默认半径
+        if (radius == null || radius <= 0) {
+            radius = 2000.0;
+            logger.info("使用默认搜索半径: 2000米");
+        }
+        try {
+            List<WorkOrderApiDto.RouteResponseVo> responses =
+                    routeService.getRoutesByLocation(name, x, y, radius);
+            // 检查返回是否为空
+            if (responses == null || responses.isEmpty()) {
+                logger.warn("未查询到位置的航线: {}, 坐标: ({}, {}), 半径: {}米",
+                        name, x, y, radius);
+                return Collections.emptyList();
+            }
+            logger.info("查询到{}条航线", responses.size());
+            return responses;
+        } catch (Exception e) {
+            logger.error("查询航线异常,位置: {}, 坐标: ({}, {})", name, x, y, e);
+            return Collections.emptyList();
+        }
     }
 
     /**
