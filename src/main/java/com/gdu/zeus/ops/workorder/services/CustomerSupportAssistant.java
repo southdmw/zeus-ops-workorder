@@ -30,6 +30,8 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
 import java.time.LocalDate;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.springframework.ai.chat.client.advisor.vectorstore.VectorStoreChatMemoryAdvisor.TOP_K;
 import static org.springframework.ai.chat.memory.ChatMemory.CONVERSATION_ID;
@@ -48,6 +50,8 @@ public class CustomerSupportAssistant {
     private final ChatClient chatClient;
     private final ChatSessionService sessionService; // 新增
 
+    private static final Map<String, Boolean> GENERATE_STATUS = new ConcurrentHashMap<>();
+
     public CustomerSupportAssistant(ChatClient.Builder modelBuilder,
                                     PatrolOrderTools patrolOrderTools,
                                     VectorStore vectorStore,
@@ -64,14 +68,16 @@ public class CustomerSupportAssistant {
 				1、工单性质(必填):用户从以下选项中选择:野外建设巡查、空中巡查、护林防御、探测大气、摄影、空中摄影、测绘。由用户确认选择。  
 				2、工单名称(必填):由系统根据上下文和时间自动生成(例如:"光谷广场巡查-yyyyMMddHHmmss"),无需用户输入或确认。  
 				3、巡查区域:明确巡查地点(如"普宙科技附近"),由用户提供。  
-				4、选择具体位置(必填): 
-				   用户提供巡查区域后,调用 getPOILocations(巡查区域) 获取具体位置列表; 
-				   展示位置列表时只向用户显示位置名称，位置信息，位置坐标供用户选择; 
-				   但你需要记住每个位置的x,y坐标信息,在调用 getAvailableRoutes 时使用。
-				5、选择已有航线(必填): 
-				   用户选择具体位置后,使用name、x、y、radius调getAvailableRoutes(name,x,y,radius);
-                   radius参数使用默认值 2000(米);
-                   展示航线列表供用户选择; 
+				4、选择具体位置(必填):
+				   - 用户提供巡查区域后,调用 getPOILocations(巡查区域) 获取具体位置列表;
+				   - 若返回为空,提示用户"未查询到该巡查区域的实际位置,请重新确定巡查区域";
+				   - 若不为空,展示位置列表时只向用户显示位置名称、位置信息、位置坐标供用户选择;
+				   - 你需要记住每个位置的x,y坐标信息,在调用 getAvailableRoutes 时使用。
+                5、选择已有航线(必填): 
+				   - 用户选择具体位置后,使用name、x、y、radius调用getAvailableRoutes(name,x,y,radius);
+				   - radius参数使用默认值 2000(米);
+				   - 若返回为空,提示用户"未查询到该具体位置的航线,请重新选择具体位置或重新确认巡查区域";
+				   - 若不为空,展示航线列表供用户选择;
 				6、执行方式(必填):用户从以下选项中选择:  
 				   - 单次:需要用户选择一个执行时间,格式为"yyyy-MM-dd HH:mm"  
 				   - 多个:需要用户选择多个执行时间,格式为"yyyy-MM-dd HH:mm"列表  
@@ -87,9 +93,11 @@ public class CustomerSupportAssistant {
 					所有必填项(工单性质、工单名称、选择具体位置、选择执行航线、执行方式、巡查结果)必须经过用户确认。  
 				  
 				工具函数使用规范  
-					用户提供巡查区域后,先调用 getPOILocations(巡查区域) 获取位置列表。  
+					用户提供巡查区域后,先调用 getPOILocations(巡查区域) 获取位置列表。
+					若位置列表为空,提示用户重新确定巡查区域,不继续后续流程。  
 					用户选择位置后,调用 getAvailableRoutes(具体位置名称,具体位置经度,具体位置纬度,搜索半径) 获取航线列表。
-					展示航线列表时向用户显示航线名和航线id,供用户选择; 
+					若航线列表为空,提示用户重新选择具体位置或重新确认巡查区域,不继续后续流程。
+					展示航线列表时向用户显示航线名和航线id,供用户选择。
 				   	但你需要记住每个航线的id,在调用 createPatrolOrder()时使用,与"routeId"字段对应。
 				   	用户选择航线后
 					调用 createPatrolOrder(工单性质,工单名称,巡查区域,具体位置,routeId,执行方式,执行时间,巡查结果,巡查目标,工单描述) 前,必须征得用户明确同意。  
@@ -99,7 +107,7 @@ public class CustomerSupportAssistant {
 					所有操作需明确告知用户并获得用户同意后执行。  
 				  
 				其他  
-					当前日期为 {current_date},应结合此日期提供上下文相关建议  
+					当前日期为 {current_date},应结合此日期提供上下文相关建议 
 				""")
 				// 插件组合
 				.defaultAdvisors(
@@ -114,7 +122,7 @@ public class CustomerSupportAssistant {
 		// @formatter:on
     }
 
-	//重构，加入userId
+    //重构，加入userId
     public Flux<String> chat(String userId,
                              String chatId,
                              String userMessageContent,
@@ -128,40 +136,52 @@ public class CustomerSupportAssistant {
                 .advisors(
                         advisor -> advisor.param(CONVERSATION_ID, chatId).param(TOP_K, 100))
 //                .options(DashScopeChatOptions.builder().withTemperature(0.1).build())
-				.options(ToolCallingChatOptions.builder().temperature(0.1).build())
-						.stream()
+                .options(ToolCallingChatOptions.builder().temperature(0.1).build())
+                .stream()
                 .content();
         // 收集完整响应并保存
         StringBuilder fullResponse = new StringBuilder();
         return content.doOnNext(chunk -> {
-			logger.info("Model output: {}",chunk);
-			if (!chunk.equals("[complete]")) {
-				fullResponse.append(chunk);
-			}
-		}).doOnComplete(() -> {
-			logger.info("Chat stream complete");
-			// 保存AI响应
-			sessionService.saveMessage(userId, chatId, MessageRole.ASSISTANT, fullResponse.toString());
-		}).concatWith(Flux.just("[complete]"));
-	}
+            logger.info("Model output: {}", chunk);
+            if (!chunk.equals("[complete]")) {
+                fullResponse.append(chunk);
+            }
+        }).doOnComplete(() -> {
+            logger.info("Chat stream complete");
+            // 保存AI响应
+            sessionService.saveMessage(userId, chatId, MessageRole.ASSISTANT, fullResponse.toString());
+        }).concatWith(Flux.just("[complete]"));
+    }
 
 
-	public Flux<String> chat(String chatId, String userMessageContent,Object... additionalTools) {
-		Flux<String> content = this.chatClient.prompt()
-				.system(s -> s.param("current_date", LocalDate.now().toString()))
-				.user(userMessageContent)
-				.tools(additionalTools)
-				.advisors(
-						// 设置advisor参数，
-						// 记忆使用chatId，
-						// 拉取最近的100条记录
-						advisor  -> advisor .param(CONVERSATION_ID, chatId).param(TOP_K, 100))
-				.options(ToolCallingChatOptions.builder().temperature(0.1).build())
-				.stream()
-				.content();
-		return content
-				.doOnNext(resp -> logger.info("Model output: {}", resp))
-				.concatWith(Flux.just("[complete]"))
-				.doOnComplete(() -> logger.info("Chat stream complete"));
-	}
+    public Flux<String> chat(String chatId, String userMessageContent, Object... additionalTools) {
+        Flux<String> content = this.chatClient.prompt()
+                .system(s -> s.param("current_date", LocalDate.now().toString()))
+                .user(userMessageContent)
+                .tools(additionalTools)
+                .advisors(
+                        // 设置advisor参数，记忆使用chatId，拉取最近的100条记录
+                        advisor -> advisor.param(CONVERSATION_ID, chatId).param(TOP_K, 100))
+                .options(ToolCallingChatOptions.builder().temperature(0.1).build())
+                .stream()
+                .chatResponse()
+                .doFirst(() -> { //输出开始，标记正在输出
+                    GENERATE_STATUS.put(chatId, true);
+                })
+                .doOnComplete(() -> { //输出结束，清除标记
+                    GENERATE_STATUS.remove(chatId);
+                    logger.info("Chat stream complete");
+                })
+                .doOnError(throwable -> GENERATE_STATUS.remove(chatId)) // 错误时清除标记
+                //是否进行输出的条件，true：继续输出，false：停止输出
+                .takeWhile(s -> GENERATE_STATUS.getOrDefault(chatId, false))
+                .map(chatResponse -> {
+                    // 获取大模型的输出的内容
+                    String text = chatResponse.getResult().getOutput().getText();
+                    return text;
+                });
+        return content
+                .doOnNext(resp -> logger.info("Model output: {}", resp))
+                .concatWith(Flux.just("[complete]"));
+    }
 }
