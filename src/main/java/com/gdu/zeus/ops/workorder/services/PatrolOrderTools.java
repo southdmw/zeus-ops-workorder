@@ -1,210 +1,270 @@
 package com.gdu.zeus.ops.workorder.services;
-import com.alibaba.fastjson.JSON;
-import com.gdu.zeus.ops.workorder.data.AIAlgorithm;
+
+import com.gdu.zeus.ops.workorder.client.dto.WorkOrderApiDto;
 import com.gdu.zeus.ops.workorder.data.PatrolOrder;
 import com.gdu.zeus.ops.workorder.data.enums.ExecutionType;
-import com.gdu.zeus.ops.workorder.data.enums.OrderType;
+import com.gdu.zeus.ops.workorder.data.enums.OrderNature;
 import com.gdu.zeus.ops.workorder.data.enums.PatrolResult;
-import com.gdu.zeus.ops.workorder.repository.AIAlgorithmRepository;
-import org.springframework.ai.document.Document;
 import org.springframework.ai.tool.annotation.Tool;
-import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 @Service
 public class PatrolOrderTools {
 
     private static final Logger logger = LoggerFactory.getLogger(PatrolOrderTools.class);
-
     private static final DateTimeFormatter CUSTOM_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
     @Autowired
     private PatrolOrderService patrolOrderService;
 
     @Autowired
-    private AIAlgorithmService aiAlgorithmService;
+    private POIServiceV2 poiService;
 
     @Autowired
-    private VectorStore vectorStore;
+    private RouteServiceV2 routeService;
 
-    @Autowired
-    private AIAlgorithmRepository algorithmRepository;
+    /**
+     * 根据巡查区域获取POI位置列表
+     */
+//    @Tool(description = "根据巡查区域获取具体POI位置列表，供用户选择")
+//    public List<String> getPOILocations(String area) {
+//        logger.info("查询POI位置，区域: {}", area);
+//        return poiService.getLocationsByArea(area);
+//    }
 
-    @Autowired
-    private RouteService routeService;
-    
-    @Autowired
-    private POIService poiService;
-
-    @Tool(description = "根据巡查区域获取具体位置列表，用于让用户选择具体位置")
-    public List<String> getPOILocationsByArea(String area) {
+    @Tool(description = "根据巡查区域获取具体POI位置列表，供用户选择")
+    public List<POILocationInfo> getPOILocations(String area) {
         logger.info("查询POI位置，区域: {}", area);
-        return poiService.getLocationsByArea(area);
+        List<WorkOrderApiDto.POILocationResponse> responses = poiService.getLocationsByArea(area);
+
+        // 转换为包含完整信息的对象
+        return responses.stream()
+                .map(poi -> new POILocationInfo(
+                        poi.getName(),
+                        poi.getX(),  // 经度
+                        poi.getY(),  // 纬度
+                        poi.getAddress()
+                ))
+                .collect(Collectors.toList());
     }
 
-    @Tool(description = "根据用户选择的具体位置获取该位置的可用航线列表")
-    public List<String> getAvailableRoutesByLocation(String location) {
-        logger.info("查询航线，位置: {}", location);
-        return routeService.getRoutesByLocation(location);
+    /**
+     * 根据具体位置获取可用航线
+     */
+    @Tool(description = "根据具体位置获取可用航线列表，供用户选择")
+    public List<WorkOrderApiDto.RouteResponseVo> getAvailableRoutes(
+            @ToolParam(description = "具体位置名称")String name,
+            @ToolParam(description = "具体位置经度")Double x,
+            @ToolParam(description = "具体位置纬度")Double y,
+            @ToolParam(description = "搜索半径，单位：米，默认2000")Double radius) {
+        logger.info("查询航线，位置: {}", name);
+        return routeService.getRoutesByLocation(name, x, y, radius);
     }
 
-    @Tool(description = "创建日常巡查工单。注意：必须在用户明确同意后才能调用此函数，未经用户确认严禁调用")
-    public PatrolOrder createDailyInspectionOrder(
-            String orderType,
-            String orderName,
-            String patrolResults,
-            String description,
-            String selectedLocation,
-            String executionRoute,
-            String executionType,
-            String executionTime,
-            String executionTimes,
-            String customExecutionDesc){
-        logger.info("创建日常巡查工单: {}", orderName);
-        logger.info("工单性质: {}", orderType);
-        logger.info("巡查结果类型: {}", patrolResults);
-        logger.info("执行类型: {}", executionType);
-        logger.info("选择的位置: {}", selectedLocation);
-        
-        OrderType mappedOrderType = mapOrderType(orderType);
-        ExecutionType mappedExecutionType = mapExecutionType(executionType);
-        
-        PatrolOrder order = null;
+    /**
+     * 创建巡查工单
+     */
+    @Tool(description = "创建巡查工单，必须在收集完所有必填信息并获得用户明确同意后才能调用")
+    public PatrolOrder createPatrolOrder(
+            @ToolParam(description = "工单性质,如:空中巡查、野外建设巡查等")String orderNature,        // 工单性质（必填）
+            @ToolParam(description = "工单名称,自动生成,格式:区域巡查-yyyyMMddHHmmss")String orderName,          // 工单名称（必填，自动生成）
+            @ToolParam(description = "巡查区域,如:光谷广场")String patrolArea,         // 巡查区域
+            @ToolParam(description = "具体位置,从POI列表中用户选择的位置")String specificLocation,   // 具体位置（必填）
+            @ToolParam(description = "执行航线ID,用户选择的航线对应的ID")String routeId,     // 执行航线（必填）
+            @ToolParam(description = "执行方式:单次/多个/自定义")String executionType,      // 执行方式（必填：单次/多个/自定义）
+            @ToolParam(description = "执行时间,单次为单个时间,多个为逗号分隔的时间列表,格式:yyyy-MM-dd HH:mm")String executionTimes,     // 执行时间（必填，根据执行方式不同格式不同）
+            @ToolParam(description = "巡查结果,可多选,格式:照片 或 视频 或 照片,视频")String patrolResults,      // 巡查结果（必填，可多选，逗号分隔：照片,视频）
+            @ToolParam(description = "巡查目标,如:违章停车检测")String patrolTarget,       // 巡查目标
+            @ToolParam(description = "工单描述,自动生成")String description) {      // 工单描述（自动生成）
+        logger.info("创建巡查工单: {}", orderName);
+        logger.info("工单性质: {}", orderNature);
+        logger.info("具体位置: {}", specificLocation);
+        logger.info("执行方式: {}", executionType);
+        logger.info("执行时间: {}", executionTimes);
+        logger.info("巡查结果: {}", patrolResults);
+
         try {
-            LocalDateTime parsedExecutionTime = null;
-            if (executionTime != null && !executionTime.isEmpty()) {
-                parsedExecutionTime = parseExecutionTime(executionTime);
-            }
-            
-            order = new PatrolOrder(
-                    mappedOrderType,
+            // 映射工单性质
+            OrderNature mappedOrderNature = mapOrderNature(orderNature);
+
+            // 映射执行方式
+            ExecutionType mappedExecutionType = mapExecutionType(executionType);
+
+            // 解析执行时间（根据执行方式不同处理不同）
+            List<LocalDateTime> executionTimeList = parseExecutionTimes(executionTimes, mappedExecutionType);
+
+            // 映射巡查结果（支持多选）
+            List<PatrolResult> mappedPatrolResults = mapPatrolResults(patrolResults);
+
+            // 构造工单对象
+            PatrolOrder order = new PatrolOrder(
+                    mappedOrderNature,
                     orderName,
-                    selectedLocation,
-                    "",
-                    parsedExecutionTime,
-                    executionTimes,
-                    customExecutionDesc,
-                    "",
-                    executionRoute,
-                    description,
-                    selectedLocation,
-                    patrolResults,
-                    mappedExecutionType
+                    patrolArea,
+                    patrolTarget,
+                    specificLocation,
+                    routeId,
+                    executionTimeList,
+                    mappedPatrolResults,
+                    mappedExecutionType,
+                    description
             );
 
+            return patrolOrderService.createOrder(order);
+
         } catch (IllegalArgumentException e) {
-            logger.error("非法的枚举值: {}", e.getMessage());
-            throw new RuntimeException("枚举参数错误: " + e.getMessage());
-        }
-        return patrolOrderService.createOrder(order);
-    }
-
-    @Tool(description = "按场景搜索算法")
-    public List<String> searchAIAlgorithmsWithRAG(String keyword) {
-        logger.info("使用RAG搜索AI算法，关键词: {}", keyword);
-        List<Document> similarDocs = vectorStore.similaritySearch(keyword);
-        List<String> list = similarDocs.stream()
-                .map(doc -> doc.getMetadata().get("algorithmName").toString())
-                .distinct().collect(Collectors.toList());
-        logger.info("返回的RAG结果: {}", JSON.toJSONString(list));
-        return list;
-    }
-
-    @Tool(description = "获取算法详细信息")
-    public AIAlgorithm getAlgorithmDetails(String algorithmName) {
-        logger.info("获取算法详细信息，算法名称: {}", algorithmName);
-        return algorithmRepository.findByAlgorithmName(algorithmName)
-                .orElse(null);
-    }
-
-    private PatrolResult mapPatrolResult(String patrolResult) {
-        if (patrolResult == null) return PatrolResult.PHOTO;
-
-        String normalized = patrolResult.trim().toLowerCase();
-        switch (normalized) {
-            case "照片":
-            case "photo":
-            case "图片":
-                return PatrolResult.PHOTO;
-            case "视频":
-            case "video":
-            case "录像":
-                return PatrolResult.VIDEO;
-            default:
-                logger.warn("未知的巡查结果类型: {}, 使用默认值 PHOTO", patrolResult);
-                return PatrolResult.PHOTO;
-        }
-    }
-
-    private LocalDateTime parseExecutionTime(String timeStr) {
-        try {
-            return LocalDateTime.parse(timeStr, CUSTOM_FORMATTER);
+            logger.error("参数错误: {}", e.getMessage());
+            throw new RuntimeException("创建工单失败: " + e.getMessage());
         } catch (Exception e) {
-            logger.warn("时间解析失败: {}, 使用当前时间", timeStr);
-            return LocalDateTime.now().plusHours(1);
+            logger.error("创建工单异常", e);
+            throw new RuntimeException("创建工单失败: " + e.getMessage());
         }
     }
 
-    private ExecutionType mapExecutionType(String executionType) {
-        if (executionType == null) return ExecutionType.SINGLE;
+    /**
+     * 映射工单性质
+     */
+    private OrderNature mapOrderNature(String orderNature) {
+        if (orderNature == null || orderNature.trim().isEmpty()) {
+            throw new IllegalArgumentException("工单性质不能为空");
+        }
 
-        String normalized = executionType.trim().toLowerCase();
+        try {
+            return OrderNature.fromDescription(orderNature.trim());
+        } catch (IllegalArgumentException e) {
+            logger.warn("未知的工单性质: {}", orderNature);
+            throw e;
+        }
+    }
+
+    /**
+     * 映射执行方式
+     */
+    private ExecutionType mapExecutionType(String executionType) {
+        if (executionType == null || executionType.trim().isEmpty()) {
+            throw new IllegalArgumentException("执行方式不能为空");
+        }
+
+        String normalized = executionType.trim();
         switch (normalized) {
             case "单次":
             case "single":
                 return ExecutionType.SINGLE;
-            case "多次":
+            case "多个":
             case "multiple":
                 return ExecutionType.MULTIPLE;
-            case "周期":
-            case "periodic":
-                return ExecutionType.PERIODIC;
             case "自定义":
             case "custom":
                 return ExecutionType.CUSTOM;
             default:
-                logger.warn("未知的执行类型: {}, 使用默认值 SINGLE", executionType);
-                return ExecutionType.SINGLE;
+                logger.warn("未知的执行方式: {}", executionType);
+                throw new IllegalArgumentException("未知的执行方式: " + executionType);
         }
     }
-    
-    private OrderType mapOrderType(String orderType) {
-        if (orderType == null) {
-            throw new IllegalArgumentException("工单性质不能为空");
+
+    /**
+     * 解析执行时间
+     * 单次: "2025-10-28 14:00"
+     * 多个: "2025-10-28 14:00,2025-10-29 14:00,2025-10-30 14:00"
+     * 自定义: "每周一14:00" 或其他自定义规则
+     */
+    private List<LocalDateTime> parseExecutionTimes(String executionTimes, ExecutionType executionType) {
+        if (executionTimes == null || executionTimes.trim().isEmpty()) {
+            throw new IllegalArgumentException("执行时间不能为空");
         }
 
-        String normalized = orderType.trim();
-        switch (normalized) {
-            case "违法建设巡查":
-            case "违法建设":
-                return OrderType.ILLEGAL_CONSTRUCTION;
-            case "空中巡查":
-                return OrderType.AERIAL_PATROL;
-            case "护林防火":
-                return OrderType.FOREST_FIRE_PREVENTION;
-            case "大气探测":
-                return OrderType.ATMOSPHERIC_DETECTION;
-            case "航空摄影":
-                return OrderType.AERIAL_PHOTOGRAPHY;
-            case "空中拍照":
-                return OrderType.AERIAL_PHOTO;
-            case "测绘":
-                return OrderType.SURVEYING;
-            case "其他":
-            case "其它":
-                return OrderType.OTHER;
-            default:
-                logger.warn("未知的工单性质: {}", orderType);
-                throw new IllegalArgumentException("未知的工单性质: " + orderType);
+        List<LocalDateTime> timeList = new ArrayList<>();
+
+        try {
+            switch (executionType) {
+                case SINGLE:
+                    // 单次执行，解析单个时间
+                    timeList.add(LocalDateTime.parse(executionTimes.trim(), CUSTOM_FORMATTER));
+                    break;
+
+                case MULTIPLE:
+                    // 多个执行时间，按逗号分隔
+                    String[] times = executionTimes.split(",");
+                    for (String time : times) {
+                        timeList.add(LocalDateTime.parse(time.trim(), CUSTOM_FORMATTER));
+                    }
+                    break;
+
+                case CUSTOM:
+                    // 自定义规则，这里简化处理，实际可能需要更复杂的解析逻辑
+                    // 暂时存储为描述文本，不解析具体时间
+                    logger.info("自定义执行规则: {}", executionTimes);
+                    // 可以返回空列表或者当前时间作为占位
+                    timeList.add(LocalDateTime.now().plusHours(1));
+                    break;
+
+                default:
+                    throw new IllegalArgumentException("不支持的执行方式");
+            }
+        } catch (Exception e) {
+            logger.error("时间解析失败: {}", executionTimes, e);
+            throw new IllegalArgumentException("时间格式错误，请使用 yyyy-MM-dd HH:mm 格式");
         }
+
+        return timeList;
     }
+
+    /**
+     * 映射巡查结果（支持多选）
+     * 输入格式: "照片" 或 "视频" 或 "照片,视频"
+     */
+    private List<PatrolResult> mapPatrolResults(String patrolResults) {
+        if (patrolResults == null || patrolResults.trim().isEmpty()) {
+            throw new IllegalArgumentException("巡查结果不能为空");
+        }
+
+        List<PatrolResult> results = new ArrayList<>();
+        String[] resultArray = patrolResults.split(",");
+
+        for (String result : resultArray) {
+            String normalized = result.trim();
+            switch (normalized) {
+                case "照片":
+                case "photo":
+                case "图片":
+                    if (!results.contains(PatrolResult.PHOTO)) {
+                        results.add(PatrolResult.PHOTO);
+                    }
+                    break;
+                case "视频":
+                case "video":
+                case "录像":
+                    if (!results.contains(PatrolResult.VIDEO)) {
+                        results.add(PatrolResult.VIDEO);
+                    }
+                    break;
+                default:
+                    logger.warn("未知的巡查结果类型: {}", result);
+            }
+        }
+
+        if (results.isEmpty()) {
+            throw new IllegalArgumentException("未识别到有效的巡查结果类型");
+        }
+
+        return results;
+    }
+
+    // 定义传输对象
+    public record POILocationInfo(
+            String name,
+            Double x,
+            Double y,
+            String address
+    ) {}
 }
