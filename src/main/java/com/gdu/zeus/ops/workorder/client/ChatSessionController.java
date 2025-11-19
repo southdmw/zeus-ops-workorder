@@ -67,4 +67,3 @@ public class ChatSessionController {
         return ResponseEntity.ok(session);
     }
 }
-
