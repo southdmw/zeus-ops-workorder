@@ -34,6 +34,9 @@ public class PatrolOrderTools {
     @Autowired
     private RouteServiceV2 routeService;
 
+    @Autowired
+    private PatrolOrderCreationService patrolOrderCreationService;
+
     /**
      * 根据巡查区域获取POI位置列表
      */
@@ -105,19 +108,26 @@ public class PatrolOrderTools {
 
     /**
      * 创建巡查工单
+     * 
+     * 该方法会：
+     * 1. 验证和映射所有参数
+     * 2. 将工单信息保存到本地数据库
+     * 3. 通过外部API调用业务系统创建工单
+     * 4. Token会通过TokenContext自动传递到业务系统API
      */
     @Tool(description = "创建巡查工单，必须在收集完所有必填信息并获得用户明确同意后才能调用")
     public PatrolOrder createPatrolOrder(
-            @ToolParam(description = "工单性质,如:空中巡查、野外建设巡查等")String orderNature,        // 工单性质（必填）
-            @ToolParam(description = "工单名称,自动生成,格式:区域巡查-yyyyMMddHHmmss")String orderName,          // 工单名称（必填，自动生成）
-            @ToolParam(description = "巡查区域,如:光谷广场")String patrolArea,         // 巡查区域
-            @ToolParam(description = "具体位置,从POI列表中用户选择的位置")String specificLocation,   // 具体位置（必填）
-            @ToolParam(description = "执行航线ID,用户选择的航线对应的ID")String routeId,     // 执行航线（必填）
-            @ToolParam(description = "执行方式:单次/多个/自定义")String executionType,      // 执行方式（必填：单次/多个/自定义）
-            @ToolParam(description = "执行时间,单次为单个时间,多个为逗号分隔的时间列表,格式:yyyy-MM-dd HH:mm")String executionTimes,     // 执行时间（必填，根据执行方式不同格式不同）
-            @ToolParam(description = "巡查结果,可多选,格式:照片 或 视频 或 照片,视频")String patrolResults,      // 巡查结果（必填，可多选，逗号分隔：照片,视频）
-            @ToolParam(description = "巡查目标,如:违章停车检测")String patrolTarget,       // 巡查目标
-            @ToolParam(description = "工单描述,自动生成")String description) {      // 工单描述（自动生成）
+            @ToolParam(description = "工单性质,如:空中巡查、野外建设巡查等")String orderNature,
+            @ToolParam(description = "工单名称,自动生成,格式:区域巡查-yyyyMMddHHmmss")String orderName,
+            @ToolParam(description = "巡查区域,如:光谷广场")String patrolArea,
+            @ToolParam(description = "具体位置,从POI列表中用户选择的位置")String specificLocation,
+            @ToolParam(description = "执行航线ID,用户选择的航线对应的ID")String routeId,
+            @ToolParam(description = "执行方式:单次/多个/自定义")String executionType,
+            @ToolParam(description = "执行时间,单次为单个时间,多个为逗号分隔的时间列表,格式:yyyy-MM-dd HH:mm")String executionTimes,
+            @ToolParam(description = "巡查结果,可多选,格式:照片 或 视频 或 照片,视频")String patrolResults,
+            @ToolParam(description = "巡查目标,如:违章停车检测")String patrolTarget,
+            @ToolParam(description = "工单描述,自动生成")String description) {
+        
         logger.info("创建巡查工单: {}", orderName);
         logger.info("工单性质: {}", orderNature);
         logger.info("具体位置: {}", specificLocation);
@@ -152,7 +162,24 @@ public class PatrolOrderTools {
                     description
             );
 
-            return patrolOrderService.createOrder(order);
+            // 1. 首先保存到本地数据库
+            PatrolOrder savedOrder = patrolOrderService.createOrder(order);
+            logger.info("工单已保存到本地数据库，ID: {}", savedOrder.getId());
+
+            // 2. 调用外部业务系统API创建工单(token会通过TokenContext自动传递)
+            try {
+                Integer externalWorkOrderId = patrolOrderCreationService.createWorkOrderViaAPI(savedOrder);
+                if (externalWorkOrderId != null && externalWorkOrderId > 0) {
+                    logger.info("工单已创建到业务系统，外部工单ID: {}", externalWorkOrderId);
+                } else {
+                    logger.warn("工单创建到业务系统失败或返回无效的工单ID");
+                }
+            } catch (Exception e) {
+                logger.error("调用业务系统API创建工单失败，但本地工单已保存", e);
+                // 即使外部API失败，本地工单已保存，不抛出异常
+            }
+
+            return savedOrder;
 
         } catch (IllegalArgumentException e) {
             logger.error("参数错误: {}", e.getMessage());

@@ -53,53 +53,53 @@ public class CustomerSupportAssistant {
     private static final Logger logger = LoggerFactory.getLogger(CustomerSupportAssistant.class);
 
     private final ChatClient chatClient;
-    private final ChatSessionService sessionService; // 新增
+    private final ChatSessionService sessionService;
 
-	private static final Map<String, Boolean> GENERATE_STATUS = new ConcurrentHashMap<>();
+    private static final Map<String, Boolean> GENERATE_STATUS = new ConcurrentHashMap<>();
 
     public CustomerSupportAssistant(ChatClient.Builder modelBuilder,
                                     PatrolOrderTools patrolOrderTools,
                                     VectorStore vectorStore,
                                     ChatMemory chatMemory,
                                     ChatSessionService sessionService,
-									@Value("classpath:system-prompt.txt") Resource systemPromptResource) {
+                                    @Value("classpath:system-prompt.txt") Resource systemPromptResource) {
         this.sessionService = sessionService;
-		// 从配置文件加载系统提示词
-		String systemPrompt = loadSystemPrompt(systemPromptResource);
-		// @formatter:off
-		this.chatClient = modelBuilder
-				.defaultSystem(systemPrompt)
-				// 插件组合
-				.defaultAdvisors(
-						PromptChatMemoryAdvisor.builder(chatMemory).build(), // Chat Memory
-						// new VectorStoreChatMemoryAdvisor(vectorStore)),
-						new QuestionAnswerAdvisor(vectorStore), // RAG
-						// new QuestionAnswerAdvisor(vectorStore, SearchRequest.defaults()
-						// 	.withFilterExpression("'documentType' == 'terms-of-service' && region in ['EU', 'US']")),
-						// logger
-						new SimpleLoggerAdvisor()
-				).defaultTools(patrolOrderTools).build();
-		// @formatter:on
+        // 从配置文件加载系统提示词
+        String systemPrompt = loadSystemPrompt(systemPromptResource);
+        // @formatter:off
+        this.chatClient = modelBuilder
+                .defaultSystem(systemPrompt)
+                // 插件组合
+                .defaultAdvisors(
+                        PromptChatMemoryAdvisor.builder(chatMemory).build(), // Chat Memory
+                        // new VectorStoreChatMemoryAdvisor(vectorStore)),
+                        new QuestionAnswerAdvisor(vectorStore), // RAG
+                        // new QuestionAnswerAdvisor(vectorStore, SearchRequest.defaults()
+                        //     .withFilterExpression("'documentType' == 'terms-of-service' && region in ['EU', 'US']")),
+                        // logger
+                        new SimpleLoggerAdvisor()
+                ).defaultTools(patrolOrderTools).build();
+        // @formatter:on
     }
 
-	/**
-	 * 从配置文件加载系统提示词
-	 */
-	private String loadSystemPrompt(Resource resource) {
-		try {
+    /**
+     * 从配置文件加载系统提示词
+     */
+    private String loadSystemPrompt(Resource resource) {
+        try {
             String systemPrompt = StreamUtils.copyToString(resource.getInputStream(), StandardCharsets.UTF_8);
             // 打印系统提示词到日志
             logger.info("=== 系统提示词加载成功 ===");
             logger.info("系统提示词内容:\n{}", systemPrompt);
             logger.info("=== 系统提示词加载完成 ===");
             return systemPrompt;
-		} catch (IOException e) {
-			logger.error("Failed to load system prompt from resource", e);
-			throw new RuntimeException("Failed to load system prompt", e);
-		}
-	}
+        } catch (IOException e) {
+            logger.error("Failed to load system prompt from resource", e);
+            throw new RuntimeException("Failed to load system prompt", e);
+        }
+    }
 
-	//重构，加入userId
+    //重构，加入userId
     public Flux<String> chat(String userId,
                              String chatId,
                              String userMessageContent,
@@ -158,21 +158,18 @@ public class CustomerSupportAssistant {
                     return text;
                 });
         return content
-				.filter(text -> text != null && !text.isBlank())
+                .filter(text -> text != null && !text.isBlank())
                 .doOnNext(resp -> logger.info("Model output: {}", resp))
-				.concatWith(Flux.just("[complete]"));
+                .concatWith(Flux.just("[complete]"));
     }*/
 
-    public Flux<String> chat(String chatId, String userMessageContent,Object... additionalTools) {
+    public Flux<String> chat(String chatId, String userMessageContent, Object... additionalTools) {
         Flux<String> content = this.chatClient.prompt()
                 .system(s -> s.param("current_date", LocalDate.now().toString()))
                 .user(userMessageContent)
                 .tools(additionalTools)
                 .advisors(
-                        // 设置advisor参数，
-                        // 记忆使用chatId，
-                        // 拉取最近的100条记录
-                        advisor  -> advisor .param(CONVERSATION_ID, chatId).param(TOP_K, 100))
+                        advisor -> advisor.param(CONVERSATION_ID, chatId).param(TOP_K, 100))
                 .options(ToolCallingChatOptions.builder().build())
                 .stream()
                 .content();
@@ -180,5 +177,18 @@ public class CustomerSupportAssistant {
                 .doOnNext(resp -> logger.info("Model output: {}", resp))
                 .concatWith(Flux.just("[complete]"))
                 .doOnComplete(() -> logger.info("Chat stream complete"));
+    }
+
+    /**
+     * 停止聊天流
+     */
+    public boolean stopChat(String chatId) {
+        logger.info("停止聊天流: {}", chatId);
+        if (GENERATE_STATUS.containsKey(chatId)) {
+            GENERATE_STATUS.put(chatId, false);
+            logger.info("聊天流已停止: {}", chatId);
+            return true;
+        }
+        return false;
     }
 }
