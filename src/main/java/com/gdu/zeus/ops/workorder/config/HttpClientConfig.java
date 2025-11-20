@@ -1,6 +1,5 @@
 package com.gdu.zeus.ops.workorder.config;
 
-import com.gdu.zeus.ops.workorder.util.TokenInterceptor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.ClientHttpRequestInterceptor;
@@ -34,10 +33,24 @@ public class HttpClientConfig {
         factory.setReadTimeout(apiProperties.getReadTimeout());
 
         RestTemplate restTemplate = new RestTemplate(factory);
-        // 添加token拦截器
-        List<ClientHttpRequestInterceptor> tokenInterceptors = new ArrayList<>();
-        tokenInterceptors.add(new TokenInterceptor());
-        restTemplate.setInterceptors(tokenInterceptors);
+        // 添加认证拦截器
+        WorkOrderApiProperties.Auth auth = apiProperties.getAuth();
+        List<ClientHttpRequestInterceptor> interceptors = new ArrayList<>();
+
+        if ("BEARER".equalsIgnoreCase(auth.getType()) && auth.getBearerToken() != null) {
+            interceptors.add((request, body, execution) -> {
+                request.getHeaders().set("Authorization", "Bearer " + auth.getBearerToken());
+                return execution.execute(request, body);
+            });
+        } else if ("API_KEY".equalsIgnoreCase(auth.getType()) && auth.getApiKey() != null) {
+            interceptors.add((request, body, execution) -> {
+                request.getHeaders().set(auth.getApiKeyHeader(), auth.getApiKey());
+                return execution.execute(request, body);
+            });
+        } else if ("BASIC".equalsIgnoreCase(auth.getType()) && auth.getUsername() != null && auth.getPassword() != null) {
+            interceptors.add(new BasicAuthenticationInterceptor(auth.getUsername(), auth.getPassword()));
+        }
+        restTemplate.setInterceptors(interceptors);
 
         return restTemplate;
     }
