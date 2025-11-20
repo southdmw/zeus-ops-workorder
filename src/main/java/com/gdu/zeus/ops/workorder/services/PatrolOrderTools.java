@@ -8,6 +8,8 @@ import com.gdu.zeus.ops.workorder.data.enums.PatrolResult;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.lang.Nullable;
+import org.springframework.stereotype.Component;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,16 +26,27 @@ public class PatrolOrderTools {
 
     private static final Logger logger = LoggerFactory.getLogger(PatrolOrderTools.class);
     private static final DateTimeFormatter CUSTOM_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
-
+    private final PatrolOrderService patrolOrderService;
+    private final POIServiceV2 poiService;
+    private final RouteServiceV2 routeService;
+    private final String token;  // 添加token字段
+    // 原有的构造函数(用于Spring注入)
+    public PatrolOrderTools(POIServiceV2 poiServiceV2,
+                            RouteServiceV2 routeServiceV2,
+                            PatrolOrderService patrolOrderService) {
+        this(poiServiceV2, routeServiceV2, patrolOrderService, null);
+    }
+    // 新增带token的构造函数
     @Autowired
-    private PatrolOrderService patrolOrderService;
-
-    @Autowired
-    private POIServiceV2 poiService;
-
-    @Autowired
-    private RouteServiceV2 routeService;
-
+    public PatrolOrderTools(POIServiceV2 poiServiceV2,
+                            RouteServiceV2 routeServiceV2,
+                            PatrolOrderService patrolOrderService,
+                            @Nullable String token) {
+        this.poiService = poiServiceV2;
+        this.routeService = routeServiceV2;
+        this.patrolOrderService = patrolOrderService;
+        this.token = token;
+    }
     /**
      * 根据巡查区域获取POI位置列表
      */
@@ -45,6 +58,7 @@ public class PatrolOrderTools {
 
     @Tool(description = "根据巡查区域获取具体POI位置列表,供用户选择。若返回空列表,需提示用户重新确定巡查区域")
     public List<POILocationInfo> getPOILocations(@ToolParam(description = "巡查区域名称,如:光谷广场") String area) {
+        logger.info("获取到token: {}", token);
         logger.info("查询POI位置，区域: {}", area);
         try {
             List<WorkOrderApiDto.POILocationResponse> responses = poiService.getLocationsByArea(area);
