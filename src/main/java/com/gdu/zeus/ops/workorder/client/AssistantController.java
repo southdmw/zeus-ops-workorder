@@ -1,7 +1,9 @@
 package com.gdu.zeus.ops.workorder.client;
 
+import com.gdu.zeus.ops.workorder.init.AIAlgorithmDataInitializer;
 import com.gdu.zeus.ops.workorder.services.CustomerSupportAssistant;
-import com.gdu.zeus.ops.workorder.util.TokenContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -11,6 +13,9 @@ import reactor.core.publisher.Flux;
 @RequestMapping("/api/assistant")
 @RestController
 public class AssistantController {
+    private static final Logger logger = LoggerFactory.getLogger(AIAlgorithmDataInitializer.class);
+    // 定义 Context Key
+    public static final String TOKEN_KEY  = "auth_token";
 
     private final CustomerSupportAssistant agent;
 
@@ -32,17 +37,7 @@ public class AssistantController {
             @RequestHeader(name = "Authorization", required = false) String token,
             @RequestParam(name = "chatId") String chatId,
             @RequestParam(name = "userMessage") String userMessage) {
-        try {
-            // 将token存入ThreadLocal
-            if (token != null) {
-                TokenContext.setToken(token);
-            }
-            return agent.chat(userId, chatId, userMessage)
-                    .doFinally(signalType -> TokenContext.clear()); // 请求结束清理
-        } catch (Exception e) {
-            TokenContext.clear();
-            throw e;
-        }
+            return agent.chat(userId, chatId, userMessage); // 请求结束清理
     }
 
     /**
