@@ -54,17 +54,25 @@ public class CustomerSupportAssistant {
 
     private final ChatClient chatClient;
     private final ChatSessionService sessionService; // 新增
+    private final POIServiceV2 poiService;
+    private final RouteServiceV2 routeService;
+    private final PatrolOrderService patrolOrderService;
 
-	private static final Map<String, Boolean> GENERATE_STATUS = new ConcurrentHashMap<>();
+    private static final Map<String, Boolean> GENERATE_STATUS = new ConcurrentHashMap<>();
 
     public CustomerSupportAssistant(ChatClient.Builder modelBuilder,
-                                    PatrolOrderTools patrolOrderTools,
                                     VectorStore vectorStore,
                                     ChatMemory chatMemory,
                                     ChatSessionService sessionService,
-									@Value("classpath:system-prompt.txt") Resource systemPromptResource) {
+                                    POIServiceV2 poiService,
+                                    RouteServiceV2 routeService,
+                                    PatrolOrderService patrolOrderService,
+                                    @Value("classpath:system-prompt.txt") Resource systemPromptResource) {
         this.sessionService = sessionService;
-		// 从配置文件加载系统提示词
+        this.poiService = poiService;
+        this.routeService = routeService;
+        this.patrolOrderService = patrolOrderService;
+        // 从配置文件加载系统提示词
 		String systemPrompt = loadSystemPrompt(systemPromptResource);
 		// @formatter:off
 		this.chatClient = modelBuilder
@@ -78,7 +86,7 @@ public class CustomerSupportAssistant {
 						// 	.withFilterExpression("'documentType' == 'terms-of-service' && region in ['EU', 'US']")),
 						// logger
 						new SimpleLoggerAdvisor()
-				).defaultTools(patrolOrderTools).build();
+				).build();
 		// @formatter:on
     }
 
@@ -112,24 +120,64 @@ public class CustomerSupportAssistant {
                 .tools(additionalTools)
                 .advisors(
                         advisor -> advisor.param(CONVERSATION_ID, chatId).param(TOP_K, 100))
-//                .options(DashScopeChatOptions.builder().withTemperature(0.1).build())
-                .options(ToolCallingChatOptions.builder().temperature(0.1).build())
+                .options(ToolCallingChatOptions.builder().build())
                 .stream()
                 .content();
         // 收集完整响应并保存
         StringBuilder fullResponse = new StringBuilder();
-        return content.doOnNext(chunk -> {
-            logger.info("Model output: {}", chunk);
-            if (!chunk.equals("[complete]")) {
-                fullResponse.append(chunk);
-            }
-        }).doOnComplete(() -> {
-            logger.info("Chat stream complete");
-            // 保存AI响应
-            sessionService.saveMessage(userId, chatId, MessageRole.ASSISTANT, fullResponse.toString());
-        }).concatWith(Flux.just("[complete]"));
+        return content
+                .doFirst(() -> {
+                    // 流开始时标记为正在生成
+                    GENERATE_STATUS.put(chatId, true);
+                    logger.info("Started chat stream for chatId: {}", chatId);
+                })
+                .takeWhile(chunk -> {
+                    // 检查是否应该继续输出
+                    return GENERATE_STATUS.getOrDefault(chatId, false);
+                })
+                .doOnNext(chunk -> {
+                    logger.info("Model output: {}", chunk);
+                    if (!chunk.equals("[完成]")) {
+                        fullResponse.append(chunk);
+                    }
+                })
+                .doOnComplete(() -> {
+                    logger.info("Chat stream complete for chatId: {}", chatId);
+                    GENERATE_STATUS.remove(chatId);
+                    // 保存AI响应
+                    if (fullResponse.length() > 0) {
+                        sessionService.saveMessage(userId, chatId, MessageRole.ASSISTANT, fullResponse.toString());
+                    }
+                })
+                .doOnError(throwable -> {
+                    logger.error("Chat stream error for chatId: {}", chatId, throwable);
+                    GENERATE_STATUS.remove(chatId);
+                })
+                .doOnCancel(() -> {
+                    logger.info("Chat stream cancelled for chatId: {}", chatId);
+                    GENERATE_STATUS.remove(chatId);
+                    // 保存部分响应
+                    if (fullResponse.length() > 0) {
+                        sessionService.saveMessage(userId, chatId, MessageRole.ASSISTANT,
+                                fullResponse.toString() + " [已停止]");
+                    }
+                }).concatWith(Flux.just("[完成]"))
+                .onBackpressureBuffer(); // 添加背压缓冲 ;
     }
 
+    /**
+     * 停止指定会话的流式输出
+     * @param chatId 会话ID
+     * @return 是否成功停止
+     */
+    public boolean stopChat(String chatId) {
+        if (GENERATE_STATUS.containsKey(chatId)) {
+            GENERATE_STATUS.remove(chatId);
+            logger.info("Stopped chat stream for chatId: {}", chatId);
+            return true;
+        }
+        return false;
+    }
 
     /*public Flux<String> chat(String chatId, String userMessageContent, Object... additionalTools) {
         Flux<String> content = this.chatClient.prompt()
@@ -163,22 +211,55 @@ public class CustomerSupportAssistant {
 				.concatWith(Flux.just("[complete]"));
     }*/
 
-    public Flux<String> chat(String chatId, String userMessageContent,Object... additionalTools) {
+
+    public Flux<String> chat(String chatId, String userMessageContent) {
+        String token = "yands123456";
+        // 创建带token的Tool实例
+        PatrolOrderTools toolsWithToken = new PatrolOrderTools(
+                poiService,
+                routeService,
+                patrolOrderService,
+                token  // 传递token
+        );
         Flux<String> content = this.chatClient.prompt()
                 .system(s -> s.param("current_date", LocalDate.now().toString()))
                 .user(userMessageContent)
-                .tools(additionalTools)
-                .advisors(
-                        // 设置advisor参数，
-                        // 记忆使用chatId，
-                        // 拉取最近的100条记录
-                        advisor  -> advisor .param(CONVERSATION_ID, chatId).param(TOP_K, 100))
+                .tools(toolsWithToken)
+                .advisors(advisor -> advisor.param(CONVERSATION_ID, chatId).param(TOP_K, 100))
                 .options(ToolCallingChatOptions.builder().build())
                 .stream()
                 .content();
+        // 收集完整响应并保存
+        StringBuilder fullResponse = new StringBuilder();
         return content
-                .doOnNext(resp -> logger.info("Model output: {}", resp))
-                .concatWith(Flux.just("[complete]"))
-                .doOnComplete(() -> logger.info("Chat stream complete"));
+                .doFirst(() -> {
+                    // 流开始时标记为正在生成
+                    GENERATE_STATUS.put(chatId, true);
+                    logger.info("Started chat stream for chatId: {}", chatId);
+                })
+                .takeWhile(chunk -> {
+                    // 检查是否应该继续输出
+                    return GENERATE_STATUS.getOrDefault(chatId, false);
+                })
+                .doOnNext(chunk -> {
+                    logger.info("Model output: {}", chunk);
+                    if (!chunk.equals("[完成]")) {
+                        fullResponse.append(chunk);
+                    }
+                })
+                .doOnComplete(() -> {
+                    logger.info("Chat stream complete for chatId: {}", chatId);
+                    GENERATE_STATUS.remove(chatId);
+                })
+                .doOnError(throwable -> {
+                    logger.error("Chat stream error for chatId: {}", chatId, throwable);
+                    GENERATE_STATUS.remove(chatId);
+                })
+                .doOnCancel(() -> {
+                    logger.info("Chat stream cancelled for chatId: {}", chatId);
+                    GENERATE_STATUS.remove(chatId);
+                })
+                .concatWith(Flux.just("[完成]"))
+                .onBackpressureBuffer(); // 添加背压缓冲 ;
     }
 }
