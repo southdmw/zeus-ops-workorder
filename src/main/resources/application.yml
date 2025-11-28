@@ -43,20 +43,29 @@ spring:
   # dashscope
   ###################
   ai:
+#    ollama:
+#      chat:
+#        options:
+#          model: qwen3:latest
+#      embedding:
+#        options:
+#          model: qwen3-embedding:latest
+#      base-url: http://172.16.63.81:11434
+    openai:
+      base-url: http://172.16.63.81:8000/v1
+      api-key: "not-required"
+      chat:
+        enabled: true
+        options:
+          model: Qwen3-VL-30B-A3B-Instruct-FP8
+      embedding:
+        enabled: false
     ollama:
       chat:
-        options:
-          model: qwen3:latest
+        enabled: false
       embedding:
-        options:
-          model: qwen3-embedding:latest
-      base-url: http://172.16.63.81:11434
+        enabled: false
     dashscope:
-      chat:
-        enabled: false
-      embedding:
-        enabled: false
-    openai:
       chat:
         enabled: false
       embedding:
@@ -205,7 +214,7 @@ workorder:
     # 认证配置
     auth:
       type: BEARER  # 认证类型: NONE, BASIC, BEARER, API_KEY
-      bearer-token: 1bd48a75-b370-4b82-9403-d071bd3ab050  # Bearer Token
+      bearer-token: a5b09181-3940-464f-bff9-f480b1bfeb75  # Bearer Token
       # api-key: your-api-key  # API Key认证时使用
       # api-key-header: X-API-Key  # API Key Header名称
       # username: your-username  # Basic认证时使用
@@ -218,3 +227,19 @@ workorder:
       get-routes: /routes/route/getRouteByRadius
       get-route-info: /routes/route/getByRouteId
       create-work-order: /business/workOrder/create
+
+# Dify配置
+dify:
+  base-url: http://172.30.0.10:30000
+  api-key: ${DIFY_API_KEY:app-Ogg3aPNeJGDDgBuD4AvBLfip}
+  timeout:
+    connect: 30s
+    read: 120s # 流式响应需要更长的超时时间
+    write: 30s
+  max-connections: 500
+  max-connections-per-route: 100
+
+springdoc:
+  version: '@springdoc.version@'
+  swagger-ui:
+    use-root-path: true
