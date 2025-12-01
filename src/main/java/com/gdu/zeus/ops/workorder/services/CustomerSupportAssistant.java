@@ -32,11 +32,11 @@ import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
-import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StreamUtils;
 import org.springframework.util.StringUtils;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Flux;
 import cn.hutool.core.map.MapUtil;
 
@@ -84,41 +84,41 @@ public class CustomerSupportAssistant {
         this.routeService = routeService;
         this.patrolOrderService = patrolOrderService;
         // 从配置文件加载系统提示词
-		String systemPrompt = loadSystemPrompt(systemPromptResource);
-		// @formatter:off
-		this.chatClient = modelBuilder
-				.defaultSystem(systemPrompt)
-				// 插件组合
-				.defaultAdvisors(
-						PromptChatMemoryAdvisor.builder(chatMemory).build(), // Chat Memory
-						// new VectorStoreChatMemoryAdvisor(vectorStore)),
-						new QuestionAnswerAdvisor(vectorStore), // RAG
-						// new QuestionAnswerAdvisor(vectorStore, SearchRequest.defaults()
-						// 	.withFilterExpression("'documentType' == 'terms-of-service' && region in ['EU', 'US']")),
-						// logger
-						new SimpleLoggerAdvisor()
-				).build();
-		// @formatter:on
+        String systemPrompt = loadSystemPrompt(systemPromptResource);
+        // @formatter:off
+        this.chatClient = modelBuilder
+                .defaultSystem(systemPrompt)
+                // 插件组合
+                .defaultAdvisors(
+                        PromptChatMemoryAdvisor.builder(chatMemory).build(), // Chat Memory
+                        // new VectorStoreChatMemoryAdvisor(vectorStore)),
+                        new QuestionAnswerAdvisor(vectorStore), // RAG
+                        // new QuestionAnswerAdvisor(vectorStore, SearchRequest.defaults()
+                        //     .withFilterExpression("'documentType' == 'terms-of-service' && region in ['EU', 'US']")),
+                        // logger
+                        new SimpleLoggerAdvisor()
+                ).build();
+        // @formatter:on
     }
 
-	/**
-	 * 从配置文件加载系统提示词
-	 */
-	private String loadSystemPrompt(Resource resource) {
-		try {
+    /**
+     * 从配置文件加载系统提示词
+     */
+    private String loadSystemPrompt(Resource resource) {
+        try {
             String systemPrompt = StreamUtils.copyToString(resource.getInputStream(), StandardCharsets.UTF_8);
             // 打印系统提示词到日志
             logger.info("=== 系统提示词加载成功 ===");
             logger.info("系统提示词内容:\n{}", systemPrompt);
             logger.info("=== 系统提示词加载完成 ===");
             return systemPrompt;
-		} catch (IOException e) {
-			logger.error("Failed to load system prompt from resource", e);
-			throw new RuntimeException("Failed to load system prompt", e);
-		}
-	}
+        } catch (IOException e) {
+            logger.error("Failed to load system prompt from resource", e);
+            throw new RuntimeException("Failed to load system prompt", e);
+        }
+    }
 
-	//重构，加入userId
+    //重构，加入userId
     public Flux<String> chat(ChatMessageRequest request,Object... additionalTools) {
         Integer chatType = request.getChatType();
         String userMessageContent = request.getQuery();
@@ -153,7 +153,7 @@ public class CustomerSupportAssistant {
                 .content();
         // 收集完整响应并保存
         StringBuilder fullResponse = new StringBuilder();
-        return content
+        Flux<String> safeContent = content
                 .doFirst(() -> {
                     // 流开始时标记为正在生成
                     GENERATE_STATUS.put(request.getConversationId(), true);
@@ -189,7 +189,11 @@ public class CustomerSupportAssistant {
                         chatService.saveMessage(request.getChatId(), chatType, MessageRole.ASSISTANT, request.getConversationId(),
                                 fullResponse.toString() + " [已停止]");
                     }
-                }).concatWith(Flux.just("[完成]"))
+                })
+                .onErrorResume(throwable -> handleChatError(throwable, request.getConversationId(), request.getChatId(), chatType));
+
+        return safeContent
+                .concatWith(Flux.just("[完成]"))
                 .onBackpressureBuffer(); // 添加背压缓冲 ;
     }
 
@@ -259,7 +263,8 @@ public class CustomerSupportAssistant {
                                 request.getConversationId(),
                                 fullResponse.toString() + " [已停止]");
                     }
-                });
+                })
+                .onErrorResume(throwable -> handleChatErrorAsSse(throwable, request.getConversationId(), request.getChatId(), chatType));
 
         // 添加元数据事件
         ServerSentEvent<String> metadataEvent = ServerSentEvent.<String>builder()
@@ -333,9 +338,9 @@ public class CustomerSupportAssistant {
                     return text;
                 });
         return content
-				.filter(text -> text != null && !text.isBlank())
+                .filter(text -> text != null && !text.isBlank())
                 .doOnNext(resp -> logger.info("Model output: {}", resp))
-				.concatWith(Flux.just("[complete]"));
+                .concatWith(Flux.just("[complete]"));
     }*/
 
 
@@ -359,7 +364,7 @@ public class CustomerSupportAssistant {
                 .content();
         // 收集完整响应并保存
         StringBuilder fullResponse = new StringBuilder();
-        return content
+        Flux<String> safeContent = content
                 .doFirst(() -> {
                     // 流开始时标记为正在生成
                     GENERATE_STATUS.put(chatId, true);
@@ -387,7 +392,53 @@ public class CustomerSupportAssistant {
                     logger.info("Chat stream cancelled for chatId: {}", chatId);
                     GENERATE_STATUS.remove(chatId);
                 })
+                .onErrorResume(throwable -> handleChatError(throwable, chatId, chatId, null));
+
+        return safeContent
                 .concatWith(Flux.just("[完成]"))
                 .onBackpressureBuffer(); // 添加背压缓冲 ;
+    }
+
+    private Flux<String> handleChatError(Throwable throwable, String conversationId, String chatId, Integer chatType) {
+        String fallbackMessage = buildFriendlyErrorMessage(throwable);
+        persistAssistantMessage(chatId, chatType, conversationId, fallbackMessage);
+        return Flux.just(fallbackMessage);
+    }
+
+    private Flux<ServerSentEvent<String>> handleChatErrorAsSse(Throwable throwable, String conversationId,
+                                                               String chatId, Integer chatType) {
+        String fallbackMessage = buildFriendlyErrorMessage(throwable);
+        persistAssistantMessage(chatId, chatType, conversationId, fallbackMessage);
+        ServerSentEvent<String> event = ServerSentEvent.<String>builder()
+                .event("message")
+                .data(fallbackMessage)
+                .build();
+        return Flux.just(event);
+    }
+
+    private void persistAssistantMessage(String chatId, Integer chatType, String conversationId, String message) {
+        if (chatService == null || !StringUtils.hasText(chatId) || chatType == null || !StringUtils.hasText(message)) {
+            return;
+        }
+        chatService.saveMessage(chatId, chatType, MessageRole.ASSISTANT, conversationId, message);
+    }
+
+    private String buildFriendlyErrorMessage(Throwable throwable) {
+        if (throwable instanceof WebClientResponseException responseException) {
+            logProviderError(responseException);
+            return String.format("AI服务请求失败（HTTP %d）。请稍后重试。", responseException.getStatusCode().value());
+        }
+        return "AI助手暂时不可用，请稍后重试。";
+    }
+
+    private void logProviderError(WebClientResponseException responseException) {
+        String responseBody = responseException.getResponseBodyAsString();
+        if (StringUtils.hasText(responseBody)) {
+            logger.error("LLM provider error response (status {}): {}",
+                    responseException.getStatusCode().value(), responseBody);
+        }
+        else {
+            logger.error("LLM provider error response with status {}", responseException.getStatusCode().value());
+        }
     }
 }
