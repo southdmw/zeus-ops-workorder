@@ -16,11 +16,16 @@
 
 package com.gdu.zeus.ops.workorder.services;
 
+import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.map.MapUtil;
+import cn.hutool.core.util.IdUtil;
+import com.alibaba.fastjson.JSON;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gdu.zeus.ops.workorder.data.enums.MessageRole;
 import com.gdu.zeus.ops.workorder.dto.ChatMessageRequest;
 import com.gdu.zeus.ops.workorder.filter.TokenContext;
+import com.gdu.zeus.ops.workorder.util.ToolResultHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -37,8 +42,9 @@ import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StreamUtils;
 import org.springframework.util.StringUtils;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.RequestMapping;
 import reactor.core.publisher.Flux;
-import cn.hutool.core.map.MapUtil;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -144,10 +150,9 @@ public class CustomerSupportAssistant {
         Flux<String> content = this.chatClient.prompt()
                 .system(s -> s.param("current_date", LocalDate.now().toString()))
                 .user(userMessageContent)
-                .tools(toolsWithToken)
+                .tools(additionalTools)
                 .advisors(
                         advisor -> advisor.param(CONVERSATION_ID, request.getConversationId()).param(TOP_K, 100))
-                .toolContext(MapUtil.<String, Object>builder().put("token", token).build())
                 .options(ToolCallingChatOptions.builder().build())
                 .stream()
                 .content();
@@ -198,6 +203,8 @@ public class CustomerSupportAssistant {
         Integer chatType = request.getChatType();
         String userMessageContent = request.getQuery();
         String token = TokenContext.getToken();
+        // 生成请求id
+        String requestId = IdUtil.fastSimpleUUID();
         // 创建带token的Tool实例
         PatrolOrderTools toolsWithToken = new PatrolOrderTools(
                 poiService,
@@ -222,6 +229,10 @@ public class CustomerSupportAssistant {
                 .tools(toolsWithToken)
                 .advisors(
                         advisor -> advisor.param(CONVERSATION_ID, request.getConversationId()).param(TOP_K, 100))
+                .toolContext(MapUtil.<String, Object>builder() // 设置tool列表
+                        .put("requestId", requestId) // 设置请求id参数
+                        .build()
+                )
                 .options(ToolCallingChatOptions.builder().build())
                 .stream()
                 .content();
@@ -272,8 +283,21 @@ public class CustomerSupportAssistant {
                 .data("done")
                 .build();
 
+        //添加订单信息
+        Map<String, Object> map = ToolResultHolder.get(requestId);
+        if (CollUtil.isNotEmpty(map)) {
+            ToolResultHolder.remove(requestId); // 清除参数列表
+            //添加订单事件
+            ServerSentEvent<String> orderinfoEvent = ServerSentEvent.<String>builder()
+                    .event("orderinfo")  // 事件类型：订单数据
+                    .data(JSON.toJSONString(map))
+                    .build();
+            return contentEvents
+                    .concatWith(Flux.just(metadataEvent, orderinfoEvent,completeEvent))
+                    .onBackpressureBuffer();
+        }
         return contentEvents
-                .concatWith(Flux.just(metadataEvent, completeEvent))
+                .concatWith(Flux.just(metadataEvent,completeEvent))
                 .onBackpressureBuffer();
     }
 
