@@ -1,10 +1,14 @@
 package com.gdu.zeus.ops.workorder.services;
 
+import cn.hutool.core.convert.Convert;
 import com.gdu.zeus.ops.workorder.client.dto.WorkOrderApiDto;
 import com.gdu.zeus.ops.workorder.data.PatrolOrder;
 import com.gdu.zeus.ops.workorder.data.enums.ExecutionType;
 import com.gdu.zeus.ops.workorder.data.enums.OrderNature;
 import com.gdu.zeus.ops.workorder.data.enums.PatrolResult;
+import com.gdu.zeus.ops.workorder.filter.TokenContext;
+import com.gdu.zeus.ops.workorder.util.ToolResultHolder;
+import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,12 +34,6 @@ public class PatrolOrderTools {
     private final POIServiceV2 poiService;
     private final RouteServiceV2 routeService;
     private final String token;  // 添加token字段
-    // 原有的构造函数(用于Spring注入)
-    public PatrolOrderTools(POIServiceV2 poiServiceV2,
-                            RouteServiceV2 routeServiceV2,
-                            PatrolOrderService patrolOrderService) {
-        this(poiServiceV2, routeServiceV2, patrolOrderService, null);
-    }
     // 新增带token的构造函数
     @Autowired
     public PatrolOrderTools(POIServiceV2 poiServiceV2,
@@ -59,6 +57,7 @@ public class PatrolOrderTools {
     @Tool(description = "根据巡查区域获取具体POI位置列表,供用户选择。若返回空列表,需提示用户重新确定巡查区域")
     public List<POILocationInfo> getPOILocations(@ToolParam(description = "巡查区域名称,如:光谷广场") String area) {
         logger.info("获取到token: {}", token);
+        TokenContext.setToken(token);
         logger.info("查询POI位置，区域: {}", area);
         try {
             List<WorkOrderApiDto.POILocationResponse> responses = poiService.getLocationsByArea(area);
@@ -95,6 +94,8 @@ public class PatrolOrderTools {
             @ToolParam(description = "具体位置纬度")Double y,
             @ToolParam(description = "搜索半径，单位：米，默认2000")Double radius) {
         logger.info("查询航线,位置: {}, 经度: {}, 纬度: {}, 半径: {}米", name, x, y, radius);
+        logger.info("获取到token: {}", token);
+        TokenContext.setToken(token);
         // 设置默认半径
         if (radius == null || radius <= 0) {
             radius = 2000.0;
@@ -131,7 +132,8 @@ public class PatrolOrderTools {
             @ToolParam(description = "执行时间,单次为单个时间,多个为逗号分隔的时间列表,格式:yyyy-MM-dd HH:mm")String executionTimes,     // 执行时间（必填，根据执行方式不同格式不同）
             @ToolParam(description = "巡查结果,可多选,格式:照片 或 视频 或 照片,视频")String patrolResults,      // 巡查结果（必填，可多选，逗号分隔：照片,视频）
             @ToolParam(description = "巡查目标,如:违章停车检测")String patrolTarget,       // 巡查目标
-            @ToolParam(description = "工单描述,自动生成")String description) {      // 工单描述（自动生成）
+            @ToolParam(description = "工单描述,自动生成")String description,
+            ToolContext toolContext) {      // 工单描述（自动生成）
         logger.info("创建巡查工单: {}", orderName);
         logger.info("工单性质: {}", orderNature);
         logger.info("具体位置: {}", specificLocation);
@@ -140,6 +142,8 @@ public class PatrolOrderTools {
         logger.info("巡查结果: {}", patrolResults);
 
         try {
+            logger.info("获取到token: {}", token);
+            TokenContext.setToken(token);
             // 映射工单性质
             OrderNature mappedOrderNature = mapOrderNature(orderNature);
 
@@ -165,8 +169,10 @@ public class PatrolOrderTools {
                     mappedExecutionType,
                     description
             );
-
-            return patrolOrderService.createOrder(order);
+            PatrolOrder returnOrder = patrolOrderService.createOrder(order);
+            String requestId = Convert.toStr(toolContext.getContext().get("requestId"));
+            ToolResultHolder.put(requestId, Convert.toStr(returnOrder.getId()) , returnOrder);
+            return returnOrder;
 
         } catch (IllegalArgumentException e) {
             logger.error("参数错误: {}", e.getMessage());
