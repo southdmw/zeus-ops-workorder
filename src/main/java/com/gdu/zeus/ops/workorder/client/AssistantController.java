@@ -33,11 +33,17 @@ public class AssistantController {
         this.agent = agent;
     }
 
+//    @CrossOrigin
+//    @RequestMapping(path = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+//    public Flux<String> chat(@RequestBody ChatMessageRequest request) {
+//
+//        return agent.chat(request);
+//    }
+
     @CrossOrigin
     @RequestMapping(path = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> chat(@RequestParam(name = "chatId") String chatId,
-                             @RequestParam(name = "userMessage") String userMessage) {
-        return agent.chat(chatId, userMessage);
+    public Flux<String> chat(@RequestBody ChatMessageRequest request) {
+        return agent.chat(request);
     }
 
     @CrossOrigin
