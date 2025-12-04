@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!-- ChatMapper.xml -->
+<mapper namespace="com.gdu.zeus.ops.workorder.mapper.ChatMapper">
+
+    <select id="selectChatsByTimeRange" resultType="com.gdu.zeus.ops.workorder.entity.Chat">
+        SELECT id, chat_id, title, create_by, create_time
+        FROM chat
+        WHERE create_by = #{createBy}
+          AND create_time BETWEEN #{startTime} AND #{endTime}
+        ORDER BY create_time DESC
+    </select>
+
+</mapper>

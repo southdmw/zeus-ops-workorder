@@ -1,1 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
+<mapper namespace="com.gdu.zeus.ops.workorder.mapper.ChatDetailMapper">
+
+    <select id="selectByChatIdAndType" resultType="com.gdu.zeus.ops.workorder.entity.ChatDetail">
+        SELECT id, chat_id, conversation_id, chat_type,
+               conversation_stop_flag, conversation_stop_time,
+               content, role, create_time
+        FROM chat_detail
+        WHERE chat_id = #{chatId}
+          AND chat_type = #{chatType}
+        ORDER BY create_time ASC
+    </select>
+
+    <select id="selectByChatId" resultType="com.gdu.zeus.ops.workorder.entity.ChatDetail">
+        SELECT id, chat_id, conversation_id, chat_type,
+               conversation_stop_flag, conversation_stop_time,
+               content, role, create_time
+        FROM chat_detail
+        WHERE chat_id = #{chatId}
+        ORDER BY create_time ASC
+    </select>
+
+    <select id="selectActiveConversationId" resultType="java.lang.String">
+        SELECT conversation_id
+        FROM chat_detail
+        WHERE chat_id = #{chatId}
+          AND chat_type = #{chatType}
+          AND conversation_stop_flag = 0
+          AND conversation_id IS NOT NULL
+        ORDER BY create_time DESC
+            LIMIT 1
+    </select>
+
+    <update id="updateConversationStopFlag">
+        UPDATE chat_detail
+        SET conversation_stop_flag = 1,
+            conversation_stop_time = NOW()
+        WHERE chat_id = #{chatId}
+          AND chat_type = #{chatType}
+          AND conversation_id = #{conversationId}
+    </update>
+
+</mapper>
