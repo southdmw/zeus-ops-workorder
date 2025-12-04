@@ -68,11 +68,8 @@ public class CustomerSupportAssistant {
     private static final Logger logger = LoggerFactory.getLogger(CustomerSupportAssistant.class);
 
     private final ChatClient chatClient;
-//    private final ChatSessionService sessionService; // 新增
-    private final POIServiceV2 poiService;
+    private final PatrolOrderTools patrolOrderTools;
     private final ChatService chatService;
-    private final RouteServiceV2 routeService;
-    private final PatrolOrderService patrolOrderService;
 
     private static final Map<String, Boolean> GENERATE_STATUS = new ConcurrentHashMap<>();
 
@@ -80,14 +77,10 @@ public class CustomerSupportAssistant {
                                     VectorStore vectorStore,
                                     ChatMemory chatMemory,
                                     ChatService chatService,
-                                    POIServiceV2 poiService,
-                                    RouteServiceV2 routeService,
-                                    PatrolOrderService patrolOrderService,
+                                    PatrolOrderTools patrolOrderTools,
                                     @Value("classpath:system-prompt.txt") Resource systemPromptResource) {
         this.chatService = chatService;
-        this.poiService = poiService;
-        this.routeService = routeService;
-        this.patrolOrderService = patrolOrderService;
+        this.patrolOrderTools = patrolOrderTools;
         // 从配置文件加载系统提示词
 		String systemPrompt = loadSystemPrompt(systemPromptResource);
 		// @formatter:off
@@ -123,83 +116,6 @@ public class CustomerSupportAssistant {
 		}
 	}
 
-	//重构，加入userId
-    public Flux<String> chat(ChatMessageRequest request,Object... additionalTools) {
-
-        String user = Optional.ofNullable(SecurityUtils.getUser()).map(UAPUser::getUsername).orElse("unknown");
-        Integer chatType = request.getChatType();
-        String userMessageContent = request.getQuery();
-        String token = TokenContext.getToken();
-        // 创建带token的Tool实例
-        PatrolOrderTools toolsWithToken = new PatrolOrderTools(
-                poiService,
-                routeService,
-                patrolOrderService,
-                token  // 传递token
-        );
-        // 1. 检查是否需要创建新对话
-        if (StringUtils.isEmpty(request.getChatId())) {
-            request.setChatId(chatService.createChat(user, userMessageContent));
-        }
-        //  检查conservationId是否存在
-        if (StringUtils.isEmpty(request.getConversationId())) {
-            request.setConversationId(UUID.randomUUID().toString());
-        }
-
-        // 保存用户消息
-        chatService.saveMessage(request.getChatId(), chatType,MessageRole.USER, request.getConversationId(),userMessageContent);
-        Flux<String> content = this.chatClient.prompt()
-                .system(s -> s.param("current_date", LocalDate.now().toString()))
-                .user(userMessageContent)
-                .tools(additionalTools)
-                .advisors(
-                        advisor -> advisor.param(CONVERSATION_ID, request.getConversationId()).param(TOP_K, 100))
-                .options(ToolCallingChatOptions.builder().build())
-                .stream()
-                .content();
-        // 收集完整响应并保存
-        StringBuilder fullResponse = new StringBuilder();
-        return content
-                .doFirst(() -> {
-                    // 流开始时标记为正在生成
-                    GENERATE_STATUS.put(request.getConversationId(), true);
-                    logger.info("Started chat stream for conversationId: {}", request.getConversationId());
-                })
-                .takeWhile(chunk -> {
-                    // 检查是否应该继续输出
-                    return GENERATE_STATUS.getOrDefault(request.getConversationId(), false);
-                })
-                .doOnNext(chunk -> {
-                    logger.info("Model output: {}", chunk);
-                    if (!chunk.equals("[完成]")) {
-                        fullResponse.append(chunk);
-                    }
-                })
-                .doOnComplete(() -> {
-                    logger.info("Chat stream complete for conversationId: {}", request.getConversationId());
-                    GENERATE_STATUS.remove(request.getConversationId());
-                    // 保存AI响应
-                    if (fullResponse.length() > 0) {
-                        chatService.saveMessage(request.getChatId(), chatType, MessageRole.ASSISTANT, request.getConversationId(), fullResponse.toString());
-                    }
-                })
-                .doOnError(throwable -> {
-                    logger.error("Chat stream error for conversationId: {}", request.getConversationId(), throwable);
-                    GENERATE_STATUS.remove(request.getConversationId());
-                })
-                .doOnCancel(() -> {
-                    logger.info("Chat stream cancelled for conversationId: {}", request.getConversationId());
-                    GENERATE_STATUS.remove(request.getConversationId());
-                    // 保存部分响应
-                    if (fullResponse.length() > 0) {
-                        chatService.saveMessage(request.getChatId(), chatType, MessageRole.ASSISTANT, request.getConversationId(),
-                                fullResponse.toString() + " [已停止]");
-                    }
-                }).concatWith(Flux.just("[完成]"))
-                .onBackpressureBuffer(); // 添加背压缓冲 ;
-    }
-
-
     public Flux<ServerSentEvent<String>> chatWithMetadata(ChatMessageRequest request) {
         String user = Optional.ofNullable(SecurityUtils.getUser()).map(UAPUser::getUsername).orElse("unknown");
         Integer chatType = request.getChatType();
@@ -207,13 +123,6 @@ public class CustomerSupportAssistant {
         String token = TokenContext.getToken();
         // 生成请求id
         String requestId = IdUtil.fastSimpleUUID();
-        // 创建带token的Tool实例
-        PatrolOrderTools toolsWithToken = new PatrolOrderTools(
-                poiService,
-                routeService,
-                patrolOrderService,
-                token  // 传递token
-        );
         // 1. 检查是否需要创建新对话
         if (StringUtils.isEmpty(request.getChatId())) {
             request.setChatId(chatService.createChat(user, userMessageContent));
@@ -223,18 +132,21 @@ public class CustomerSupportAssistant {
             request.setConversationId(UUID.randomUUID().toString());
         }
 
+        // 构建工具上下文(包含Token)
+        Map<String, Object> toolContext = MapUtil.<String, Object>builder()
+                .put("requestId", requestId)
+                .put(TokenContext.TOKEN_KEY, token)
+                .build();
+
         // 保存用户消息
         chatService.saveMessage(request.getChatId(), chatType,MessageRole.USER, request.getConversationId(),userMessageContent);
         Flux<String> content = this.chatClient.prompt()
                 .system(s -> s.param("current_date", LocalDate.now().toString()))
                 .user(userMessageContent)
-                .tools(toolsWithToken)
+                .tools(patrolOrderTools)
                 .advisors(
                         advisor -> advisor.param(CONVERSATION_ID, request.getConversationId()).param(TOP_K, 100))
-                .toolContext(MapUtil.<String, Object>builder() // 设置tool列表
-                        .put("requestId", requestId) // 设置请求id参数
-                        .build()
-                )
+                .toolContext(toolContext)
                 .options(ToolCallingChatOptions.builder().build())
                 .stream()
                 .content();
@@ -329,52 +241,11 @@ public class CustomerSupportAssistant {
         return false;
     }
 
-    /*public Flux<String> chat(String chatId, String userMessageContent, Object... additionalTools) {
-        Flux<String> content = this.chatClient.prompt()
-                .system(s -> s.param("current_date", LocalDate.now().toString()))
-                .user(userMessageContent)
-                .tools(additionalTools)
-                .advisors(
-                        // 设置advisor参数，记忆使用chatId，拉取最近的100条记录
-                        advisor -> advisor.param(CONVERSATION_ID, chatId).param(TOP_K, 100))
-                .options(ToolCallingChatOptions.builder().build())
-                .stream()
-                .chatResponse()
-                .doFirst(() -> { //输出开始，标记正在输出
-                    GENERATE_STATUS.put(chatId, true);
-                })
-                .doOnComplete(() -> { //输出结束，清除标记
-                    GENERATE_STATUS.remove(chatId);
-                    logger.info("Chat stream complete");
-                })
-                .doOnError(throwable -> GENERATE_STATUS.remove(chatId)) // 错误时清除标记
-                //是否进行输出的条件，true：继续输出，false：停止输出
-                .takeWhile(s -> GENERATE_STATUS.getOrDefault(chatId, false))
-                .map(chatResponse -> {
-                    // 获取大模型的输出的内容
-                    String text = chatResponse.getResult().getOutput().getText();
-                    return text;
-                });
-        return content
-				.filter(text -> text != null && !text.isBlank())
-                .doOnNext(resp -> logger.info("Model output: {}", resp))
-				.concatWith(Flux.just("[complete]"));
-    }*/
-
-
     public Flux<String> chat(String chatId, String userMessageContent) {
-        String token = TokenContext.getToken();
-        // 创建带token的Tool实例
-        PatrolOrderTools toolsWithToken = new PatrolOrderTools(
-                poiService,
-                routeService,
-                patrolOrderService,
-                token  // 传递token
-        );
         Flux<String> content = this.chatClient.prompt()
                 .system(s -> s.param("current_date", LocalDate.now().toString()))
                 .user(userMessageContent)
-                .tools(toolsWithToken)
+                .tools(patrolOrderTools)
                 .advisors(advisor -> advisor.param(CONVERSATION_ID, chatId).param(TOP_K, 100))
                 .options(ToolCallingChatOptions.builder().build())
 //                .options(new TokenAwareChatOptions(token))

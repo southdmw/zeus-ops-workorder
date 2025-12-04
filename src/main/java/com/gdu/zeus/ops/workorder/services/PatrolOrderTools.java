@@ -8,13 +8,11 @@ import com.gdu.zeus.ops.workorder.data.enums.OrderNature;
 import com.gdu.zeus.ops.workorder.data.enums.PatrolResult;
 import com.gdu.zeus.ops.workorder.filter.TokenContext;
 import com.gdu.zeus.ops.workorder.util.ToolResultHolder;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -24,45 +22,30 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 public class PatrolOrderTools {
-
-    private static final Logger logger = LoggerFactory.getLogger(PatrolOrderTools.class);
     private static final DateTimeFormatter CUSTOM_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
-    private final PatrolOrderService patrolOrderService;
-    private final POIServiceV2 poiService;
-    private final RouteServiceV2 routeService;
-    private final String token;  // 添加token字段
-    // 新增带token的构造函数
     @Autowired
-    public PatrolOrderTools(POIServiceV2 poiServiceV2,
-                            RouteServiceV2 routeServiceV2,
-                            PatrolOrderService patrolOrderService,
-                            @Nullable String token) {
-        this.poiService = poiServiceV2;
-        this.routeService = routeServiceV2;
-        this.patrolOrderService = patrolOrderService;
-        this.token = token;
-    }
-    /**
-     * 根据巡查区域获取POI位置列表
-     */
-//    @Tool(description = "根据巡查区域获取具体POI位置列表，供用户选择")
-//    public List<String> getPOILocations(String area) {
-//        logger.info("查询POI位置，区域: {}", area);
-//        return poiService.getLocationsByArea(area);
-//    }
+    private PatrolOrderService patrolOrderService;
+    @Autowired
+    private POIService poiService;
+    @Autowired
+    private RouteService routeService;
 
     @Tool(description = "根据巡查区域获取具体POI位置列表,供用户选择。若返回空列表,需提示用户重新确定巡查区域")
-    public List<POILocationInfo> getPOILocations(@ToolParam(description = "巡查区域名称") String area) {
-        logger.info("获取到token: {}", token);
+    public List<POILocationInfo> getPOILocations(@ToolParam(description = "巡查区域名称") String area,
+                                                 ToolContext toolContext) {
+        // 从ToolContext获取Token
+        String token = extractTokenFromContext(toolContext);
+        log.info("获取到token: {}", token);
         TokenContext.setToken(token);
-        logger.info("查询POI位置，区域: {}", area);
+        log.info("查询POI位置，区域: {}", area);
         try {
             List<WorkOrderApiDto.POILocationResponse> responses = poiService.getLocationsByArea(area);
             // 检查返回是否为空
             if (responses == null || responses.isEmpty()) {
-                logger.warn("未查询到巡查区域的POI位置: {}", area);
+                log.warn("未查询到巡查区域的POI位置: {}", area);
                 return Collections.emptyList();
             }
             // 转换为包含完整信息的对象
@@ -75,10 +58,10 @@ public class PatrolOrderTools {
                     ))
                     .collect(Collectors.toList());
 
-            logger.info("查询到{}个POI位置", result.size());
+            log.info("查询到{}个POI位置", result.size());
             return result;
         } catch (Exception e) {
-            logger.error("查询POI位置异常,区域: {}", area, e);
+            log.error("查询POI位置异常,区域: {}", area, e);
             return Collections.emptyList();
         }
     }
@@ -91,28 +74,31 @@ public class PatrolOrderTools {
             @ToolParam(description = "具体位置名称")String name,
             @ToolParam(description = "具体位置经度")Double x,
             @ToolParam(description = "具体位置纬度")Double y,
-            @ToolParam(description = "搜索半径，单位：米，默认2000")Double radius) {
-        logger.info("查询航线,位置: {}, 经度: {}, 纬度: {}, 半径: {}米", name, x, y, radius);
-        logger.info("获取到token: {}", token);
+            @ToolParam(description = "搜索半径，单位：米，默认2000")Double radius,
+            ToolContext toolContext) {
+        log.info("查询航线,位置: {}, 经度: {}, 纬度: {}, 半径: {}米", name, x, y, radius);
+        // 从ToolContext获取Token
+        String token = extractTokenFromContext(toolContext);
+        log.info("获取到token: {}", token);
         TokenContext.setToken(token);
         // 设置默认半径
         if (radius == null || radius <= 0) {
             radius = 2000.0;
-            logger.info("使用默认搜索半径: 2000米");
+            log.info("使用默认搜索半径: 2000米");
         }
         try {
             List<WorkOrderApiDto.RouteResponseVo> responses =
                     routeService.getRoutesByLocation(name, x, y, radius);
             // 检查返回是否为空
             if (responses == null || responses.isEmpty()) {
-                logger.warn("未查询到位置的航线: {}, 坐标: ({}, {}), 半径: {}米",
+                log.warn("未查询到位置的航线: {}, 坐标: ({}, {}), 半径: {}米",
                         name, x, y, radius);
                 return Collections.emptyList();
             }
-            logger.info("查询到{}条航线", responses.size());
+            log.info("查询到{}条航线", responses.size());
             return responses;
         } catch (Exception e) {
-            logger.error("查询航线异常,位置: {}, 坐标: ({}, {})", name, x, y, e);
+            log.error("查询航线异常,位置: {}, 坐标: ({}, {})", name, x, y, e);
             return Collections.emptyList();
         }
     }
@@ -133,15 +119,17 @@ public class PatrolOrderTools {
             @ToolParam(description = "巡查目标,如:违章停车检测")String patrolTarget,       // 巡查目标
             @ToolParam(description = "工单描述,自动生成")String description,
             ToolContext toolContext) {      // 工单描述（自动生成）
-        logger.info("创建巡查工单: {}", orderName);
-        logger.info("工单性质: {}", orderNature);
-        logger.info("具体位置: {}", specificLocation);
-        logger.info("执行方式: {}", executionType);
-        logger.info("执行时间: {}", executionTimes);
-        logger.info("巡查结果: {}", patrolResults);
+        log.info("创建巡查工单: {}", orderName);
+        log.info("工单性质: {}", orderNature);
+        log.info("具体位置: {}", specificLocation);
+        log.info("执行方式: {}", executionType);
+        log.info("执行时间: {}", executionTimes);
+        log.info("巡查结果: {}", patrolResults);
 
         try {
-            logger.info("获取到token: {}", token);
+            // 从ToolContext获取Token
+            String token = extractTokenFromContext(toolContext);
+            log.info("获取到token: {}", token);
             TokenContext.setToken(token);
             // 映射工单性质
             OrderNature mappedOrderNature = mapOrderNature(orderNature);
@@ -177,12 +165,23 @@ public class PatrolOrderTools {
             return returnOrder;
 
         } catch (IllegalArgumentException e) {
-            logger.error("参数错误: {}", e.getMessage());
+            log.error("参数错误: {}", e.getMessage());
             throw new RuntimeException("创建工单失败: " + e.getMessage());
         } catch (Exception e) {
-            logger.error("创建工单异常", e);
+            log.error("创建工单异常", e);
             throw new RuntimeException("创建工单失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * 从ToolContext提取Token
+     */
+    private String extractTokenFromContext(ToolContext toolContext) {
+        if (toolContext != null && toolContext.getContext() != null) {
+            Object token = toolContext.getContext().get(TokenContext.TOKEN_KEY);
+            return token != null ? token.toString() : null;
+        }
+        return null;
     }
 
     /**
@@ -196,7 +195,7 @@ public class PatrolOrderTools {
         try {
             return OrderNature.fromDescription(orderNature.trim());
         } catch (IllegalArgumentException e) {
-            logger.warn("未知的工单性质: {}", orderNature);
+            log.warn("未知的工单性质: {}", orderNature);
             throw e;
         }
     }
@@ -221,7 +220,7 @@ public class PatrolOrderTools {
             case "custom":
                 return ExecutionType.CUSTOM;
             default:
-                logger.warn("未知的执行方式: {}", executionType);
+                log.warn("未知的执行方式: {}", executionType);
                 throw new IllegalArgumentException("未知的执行方式: " + executionType);
         }
     }
@@ -257,7 +256,7 @@ public class PatrolOrderTools {
                 case CUSTOM:
                     // 自定义规则，这里简化处理，实际可能需要更复杂的解析逻辑
                     // 暂时存储为描述文本，不解析具体时间
-                    logger.info("自定义执行规则: {}", executionTimes);
+                    log.info("自定义执行规则: {}", executionTimes);
                     // 可以返回空列表或者当前时间作为占位
                     timeList.add(LocalDateTime.now().plusHours(1));
                     break;
@@ -266,7 +265,7 @@ public class PatrolOrderTools {
                     throw new IllegalArgumentException("不支持的执行方式");
             }
         } catch (Exception e) {
-            logger.error("时间解析失败: {}", executionTimes, e);
+            log.error("时间解析失败: {}", executionTimes, e);
             throw new IllegalArgumentException("时间格式错误，请使用 yyyy-MM-dd HH:mm 格式");
         }
 
@@ -303,7 +302,7 @@ public class PatrolOrderTools {
                     }
                     break;
                 default:
-                    logger.warn("未知的巡查结果类型: {}", result);
+                    log.warn("未知的巡查结果类型: {}", result);
             }
         }
 
