@@ -264,4 +264,16 @@ security:
       ignoreUrls:
         - /mobile/**
         - /inner/**
-        - /assets/**
+        # 新增：Swagger/Knife4j文档
+        - /doc.html
+        - /swagger-ui.html
+        - /swagger-ui/**
+        - /v3/api-docs/**
+        - /webjars/**
+        - /swagger-resources/**
+        # 新增：Actuator监控
+        - /actuator/**
+        # 新增：静态资源
+        - /static/**
+        - /templates/**
+ 
