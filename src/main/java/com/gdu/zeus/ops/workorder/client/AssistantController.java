@@ -1,6 +1,5 @@
 package com.gdu.zeus.ops.workorder.client;
 
-import com.gdu.zeus.ops.workorder.dto.ChatMessageRequest;
 import com.gdu.zeus.ops.workorder.init.AIAlgorithmDataInitializer;
 import com.gdu.zeus.ops.workorder.services.CustomerSupportAssistant;
 import lombok.extern.slf4j.Slf4j;
@@ -35,15 +34,8 @@ public class AssistantController {
 //
 //        return agent.chat(request);
 //    }
-
     @CrossOrigin
     @RequestMapping(path = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> chat(@RequestBody ChatMessageRequest request) {
-        return agent.chat(request);
-    }
-
-    @CrossOrigin
-    @RequestMapping(path = "/chatByUserId", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> chat(
             @RequestHeader(name = "Authorization", required = false) String token,
             @RequestParam(name = "chatId") String chatId,
@@ -63,19 +55,6 @@ public class AssistantController {
         } else {
             return ResponseEntity.ok("No active chat stream found for chatId: " + chatId);
         }
-    }
-
-    /**
-     * 从Authorization header中提取Bearer Token
-     */
-    private String extractBearerToken(String authHeader) {
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            String token = authHeader.substring(7);
-            log.info("提取到Bearer Token: {}***", token.substring(0, Math.min(8, token.length())));
-            return token;
-        }
-        log.warn("未找到有效的Bearer Token");
-        return null;
     }
 
 }

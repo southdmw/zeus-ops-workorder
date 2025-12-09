@@ -1,7 +1,6 @@
 package com.gdu.zeus.ops.workorder.client;
 
 
-import com.gdu.uap.auth.client.security.annotation.Inner;
 import com.gdu.zeus.ops.workorder.data.PatrolOrder;
 import com.gdu.zeus.ops.workorder.services.PatrolOrderService;
 import org.springframework.stereotype.Controller;
@@ -26,7 +25,6 @@ public class PatrolController {
 
 	@RequestMapping("/api/bookings")
 	@ResponseBody
-	@Inner
 	public List<PatrolOrder> getBookings() {
 		return patrolOrderService.queryPatrolOrder();
 	}

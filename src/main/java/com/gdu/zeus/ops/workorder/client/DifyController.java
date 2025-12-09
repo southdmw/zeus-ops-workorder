@@ -3,6 +3,7 @@ package com.gdu.zeus.ops.workorder.client;
 import com.gdu.common.core.util.R;
 import com.gdu.uap.auth.client.security.annotation.Inner;
 import com.gdu.zeus.ops.workorder.config.DifyClientConfig;
+import com.gdu.zeus.ops.workorder.dto.ChatMessageRequest;
 import com.gdu.zeus.ops.workorder.dto.WorkFlowRequest;
 import com.gdu.zeus.ops.workorder.dto.WorkflowResponse;
 import com.gdu.zeus.ops.workorder.services.DifyProxyService;
@@ -26,6 +27,7 @@ public class DifyController {
 
     private final DifyProxyService difyProxyService;
     private final DifyClientConfig.DifyProperties difyProperties;
+
     /**
      * 运行dify工作流
      *
@@ -35,8 +37,8 @@ public class DifyController {
      * @return 响应结果
      */
     @Inner
-    @PostMapping("/run-workflow")
-    public Mono<ResponseEntity<WorkflowResponse>> runWorkflow(
+    @PostMapping("/inner/run-workflow")
+    public Mono<ResponseEntity<WorkflowResponse>> runWorkflowInner(
             @RequestBody WorkFlowRequest request) {
         request.setUser("zeus-ops-ai");
         String userId = request.getUser();
@@ -48,6 +50,26 @@ public class DifyController {
 
         log.info("收到阻塞聊天请求 - userId: {}, traceId: {}",
                 userId, traceId);
+
+        return difyProxyService.runWorkflowInner(request)
+                .map(ResponseEntity::ok)
+                .onErrorResume(error -> {
+                    log.error("阻塞聊天失败", error);
+                    // 返回错误信息
+                    return Mono.just(ResponseEntity
+                            .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .body(null));
+                });
+    }
+
+    /**
+     * 大模型复检
+     * @param request
+     * @return
+     */
+    @PostMapping("/run-workflow")
+    public Mono<ResponseEntity<WorkflowResponse>> runWorkflow(
+            @RequestBody ChatMessageRequest request) {
 
         return difyProxyService.runWorkflow(request)
                 .map(ResponseEntity::ok)
