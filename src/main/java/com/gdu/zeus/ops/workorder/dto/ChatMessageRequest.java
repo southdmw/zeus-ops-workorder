@@ -15,4 +15,9 @@ public class ChatMessageRequest {
     private String query;
     private String userId;
     private List<FileInfoDTO> files;
+    /**
+     * Dify工作流的输入参数
+     * 例如: {"Warning_Type": "建筑垃圾", "Image": {...}}
+     */
+    private LLmRecheckInputs inputs;
 }

@@ -7,6 +7,8 @@ import java.util.Map;
 @Data
 public class WorkflowResponse {
     private String taskId;
+    private String chatId;
+    private String title;
     private String workflowRunId;
     private WorkflowData data;
     

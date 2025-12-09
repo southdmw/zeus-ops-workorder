@@ -6,8 +6,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.util.Map;
-
 /**
  * 聊天消息请求DTO
  */
@@ -22,7 +20,7 @@ public class WorkFlowRequest {
     /**
      * 应用定义的变量值
      */
-    private Map<String, Object> inputs;
+    private LLmRecheckInputs inputs;
 
     /**
      * 响应模式: streaming(流式) 或 blocking(阻塞)
