@@ -3,6 +3,7 @@ package com.gdu.zeus.ops.workorder.entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.Builder;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -11,6 +12,7 @@ import java.time.LocalDateTime;
  * 对话详情表实体类
  */
 @Data
+@Builder
 @TableName("chat_detail")
 public class ChatDetail {
     
@@ -49,7 +51,11 @@ public class ChatDetail {
      * 对话内容
      */
     private String content;
-    
+
+    /**
+     * 图片链接
+     */
+    private String imgUrl;
     /**
      * 对话角色：USER-用户提问 ASSISTANT-大模型回答
      */
