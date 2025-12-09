@@ -54,7 +54,6 @@ public class WorkOrderExternalServiceImpl implements WorkOrderExternalService {
     public List<WorkOrderApiDto.OrderNatureResponse> getNatureList() {
         try {
             log.info("获取工单性质列表");
-
             ResponseEntity<WorkOrderApiDto.ApiResponse<List<WorkOrderApiDto.OrderNatureResponse>>> response =
                     restTemplate.exchange(
                             apiProperties.getBaseUrl() + apiProperties.getEndpoints().getNatureList(),
