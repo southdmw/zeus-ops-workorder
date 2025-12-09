@@ -169,9 +169,7 @@ public class ChatService {
         chat.setTitle(firstQuery); // 暂时使用第一次提问作为标题，后续可以调用大模型生成
         chat.setCreateBy(userId);
         chat.setCreateTime(LocalDateTime.now());
-        
         chatMapper.insert(chat);
-        
         return chat.getChatId();
     }
     
@@ -257,23 +255,13 @@ public class ChatService {
     /**
      * 保存消息
      */
-    public void saveMessage(String chatId, Integer chatType, MessageRole role,
-                                  String conversationId, String content) {
-        ChatDetail detail = new ChatDetail();
-        detail.setChatId(chatId);
-        detail.setChatType(chatType);
-        detail.setConversationId(conversationId);
-        detail.setContent(content);
-        detail.setRole(role.name());
-        detail.setConversationStopFlag(0);
-        detail.setCreateTime(LocalDateTime.now());
-
+    public void saveMessage(ChatDetail detail) {
         chatDetailMapper.insert(detail);
         // 同步到ChatMemory(用于AI上下文)
-        Message aiMessage = role == MessageRole.USER
-                ? new UserMessage(content)
-                : new AssistantMessage(content);
-        chatMemory.add(chatId, aiMessage);
+        Message aiMessage = detail.getRole() == MessageRole.USER.name()
+                ? new UserMessage(detail.getContent())
+                : new AssistantMessage(detail.getContent());
+        chatMemory.add(detail.getConversationId(), aiMessage);
 
     }
     

@@ -26,6 +26,7 @@ import com.gdu.uap.auth.core.oauth2.UAPUser;
 import com.gdu.uap.auth.core.util.SecurityUtils;
 import com.gdu.zeus.ops.workorder.data.enums.MessageRole;
 import com.gdu.zeus.ops.workorder.dto.ChatMessageRequest;
+import com.gdu.zeus.ops.workorder.entity.ChatDetail;
 import com.gdu.zeus.ops.workorder.filter.TokenContext;
 import com.gdu.zeus.ops.workorder.util.ToolResultHolder;
 import org.slf4j.Logger;
@@ -36,16 +37,11 @@ import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.Resource;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StreamUtils;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.Map;
@@ -67,9 +63,11 @@ public class CustomerSupportAssistant {
 
     private static final Logger logger = LoggerFactory.getLogger(CustomerSupportAssistant.class);
 
-    private final ChatClient chatClient;
+    private final ChatClient.Builder chatClientBuilder;
+    private final ChatMemory chatMemory;
     private final PatrolOrderTools patrolOrderTools;
     private final ChatService chatService;
+    private final SystemPromptService systemPromptService;
 
     private static final Map<String, Boolean> GENERATE_STATUS = new ConcurrentHashMap<>();
 
@@ -78,43 +76,26 @@ public class CustomerSupportAssistant {
                                     ChatMemory chatMemory,
                                     ChatService chatService,
                                     PatrolOrderTools patrolOrderTools,
-                                    @Value("classpath:system-prompt.txt") Resource systemPromptResource) {
+                                    SystemPromptService systemPromptService) {
+        this.chatClientBuilder = modelBuilder;
         this.chatService = chatService;
         this.patrolOrderTools = patrolOrderTools;
-        // 从配置文件加载系统提示词
-		String systemPrompt = loadSystemPrompt(systemPromptResource);
-		// @formatter:off
-		this.chatClient = modelBuilder
-				.defaultSystem(systemPrompt)
-				// 插件组合
-				.defaultAdvisors(
-						PromptChatMemoryAdvisor.builder(chatMemory).build(), // Chat Memory
-						// new VectorStoreChatMemoryAdvisor(vectorStore)),
-						// new QuestionAnswerAdvisor(vectorStore), // RAG
-						// new QuestionAnswerAdvisor(vectorStore, SearchRequest.defaults()
-						// 	.withFilterExpression("'documentType' == 'terms-of-service' && region in ['EU', 'US']")),
-						// logger
-						new SimpleLoggerAdvisor()
-				).build();
-		// @formatter:on
+		this.chatMemory = chatMemory;
+        this.systemPromptService = systemPromptService;
+    }
+    /**
+     * 获取ChatClient（每次调用时使用最新的系统提示词）
+     */
+    private ChatClient getChatClient() {
+        String systemPrompt = systemPromptService.getSystemPrompt();
+        return chatClientBuilder
+                .defaultSystem(systemPrompt)
+                .defaultAdvisors(
+                        PromptChatMemoryAdvisor.builder(chatMemory).build(),
+                        new SimpleLoggerAdvisor()
+                ).build();
     }
 
-	/**
-	 * 从配置文件加载系统提示词
-	 */
-	private String loadSystemPrompt(Resource resource) {
-		try {
-            String systemPrompt = StreamUtils.copyToString(resource.getInputStream(), StandardCharsets.UTF_8);
-            // 打印系统提示词到日志
-            logger.info("=== 系统提示词加载成功 ===");
-            logger.info("系统提示词内容:\n{}", systemPrompt);
-            logger.info("=== 系统提示词加载完成 ===");
-            return systemPrompt;
-		} catch (IOException e) {
-			logger.error("Failed to load system prompt from resource", e);
-			throw new RuntimeException("Failed to load system prompt", e);
-		}
-	}
 
     public Flux<ServerSentEvent<String>> chatWithMetadata(ChatMessageRequest request) {
         String user = Optional.ofNullable(SecurityUtils.getUser()).map(UAPUser::getUsername).orElse("unknown");
@@ -139,8 +120,16 @@ public class CustomerSupportAssistant {
                 .build();
 
         // 保存用户消息
-        chatService.saveMessage(request.getChatId(), chatType,MessageRole.USER, request.getConversationId(),userMessageContent);
-        Flux<String> content = this.chatClient.prompt()
+        chatService.saveMessage(ChatDetail.builder()
+                        .chatId(request.getChatId())
+                        .chatType(chatType)
+                        .role(MessageRole.USER.name())
+                        .conversationId(request.getConversationId())
+                        .content(userMessageContent)
+                        .build());
+        // 使用最新的系统提示词构建ChatClient
+        ChatClient chatClient = getChatClient();
+        Flux<String> content = chatClient.prompt()
                 .system(s -> s.param("current_date", LocalDate.now().toString()))
                 .user(userMessageContent)
                 .tools(patrolOrderTools)
@@ -167,8 +156,14 @@ public class CustomerSupportAssistant {
                     logger.info("Chat stream complete");
                     GENERATE_STATUS.remove(request.getConversationId());
                     if (fullResponse.length() > 0) {
-                        chatService.saveMessage(request.getChatId(), chatType, MessageRole.ASSISTANT,
-                                request.getConversationId(), fullResponse.toString());
+                        chatService.saveMessage(
+                                ChatDetail.builder()
+                                        .chatId(request.getChatId())
+                                        .chatType(chatType)
+                                        .role(MessageRole.ASSISTANT.name())
+                                        .conversationId(request.getConversationId())
+                                        .content(fullResponse.toString())
+                                        .build());
                     }
                 })
                 .doOnError(throwable -> {
@@ -179,9 +174,14 @@ public class CustomerSupportAssistant {
                     logger.info("Chat stream cancelled");
                     GENERATE_STATUS.remove(request.getConversationId());
                     if (fullResponse.length() > 0) {
-                        chatService.saveMessage(request.getChatId(), chatType, MessageRole.ASSISTANT,
-                                request.getConversationId(),
-                                fullResponse.toString() + " [已停止]");
+                        chatService.saveMessage(
+                                ChatDetail.builder()
+                                        .chatId(request.getChatId())
+                                        .chatType(chatType)
+                                        .role(MessageRole.ASSISTANT.name())
+                                        .conversationId(request.getConversationId())
+                                        .content(fullResponse + " [已停止]")
+                                        .build());
                     }
                 });
 
@@ -242,13 +242,26 @@ public class CustomerSupportAssistant {
     }
 
     public Flux<String> chat(String chatId, String userMessageContent) {
-        Flux<String> content = this.chatClient.prompt()
+
+        // 生成请求id
+        String requestId = IdUtil.fastSimpleUUID();
+        String token = "cbd4dee6-33b3-4833-ba7b-884f4d22a29b";
+        TokenContext.setToken(token);
+        // 构建工具上下文(包含Token)
+        Map<String, Object> toolContext = MapUtil.<String, Object>builder()
+                .put("requestId", requestId)
+                .put(TokenContext.TOKEN_KEY, token)
+                .build();
+
+        // 使用最新的系统提示词构建ChatClient
+        ChatClient chatClient = getChatClient();
+        Flux<String> content = chatClient.prompt()
                 .system(s -> s.param("current_date", LocalDate.now().toString()))
                 .user(userMessageContent)
                 .tools(patrolOrderTools)
                 .advisors(advisor -> advisor.param(CONVERSATION_ID, chatId).param(TOP_K, 100))
+                .toolContext(toolContext)
                 .options(ToolCallingChatOptions.builder().build())
-//                .options(new TokenAwareChatOptions(token))
                 .stream()
                 .content();
         // 收集完整响应并保存
