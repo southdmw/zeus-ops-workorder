@@ -15,4 +15,7 @@ EXPOSE 9000
 
 ADD ./target/zeus-ops-workorder.jar ./
 
-CMD java $JAVA_OPTS -jar zeus-ops-workorder.jar
+# 使用外部挂载的配置文件
+CMD java $JAVA_OPTS \
+    -Dspring.config.location=/config/application.yml \
+    -jar zeus-ops-workorder.jar
