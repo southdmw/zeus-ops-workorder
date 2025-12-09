@@ -5,13 +5,17 @@ spring:
   web:
     resources:
       add-mappings: true
+
   threads:
     virtual:
       enabled: true
 
   mvc:
     static-path-pattern: /templates/**
-
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 100MB
   thymeleaf:
     cache: false
 
@@ -178,6 +182,9 @@ spring:
 #           host: http://localhost
 #           port: 8000
 
+# 系统提示词外部文件路径配置（K8S环境使用）
+system-prompt:
+  file-path: ${SYSTEM_PROMPT_FILE_PATH:}
 # 工单系统API配置示例
 workorder:
   # Mock模式开关
@@ -267,6 +274,10 @@ security:
       ignoreUrls:
         - /mobile/**
         - /inner/**
+        - /assets/**
+        - /api/**
+        - /index.html
+        - /favicon.ico
         # 新增：Swagger/Knife4j文档
         - /doc.html
         - /swagger-ui.html
@@ -279,5 +290,3 @@ security:
         # 新增：静态资源
         - /static/**
         - /templates/**
- 
-
