@@ -4,7 +4,6 @@ import com.gdu.zeus.ops.workorder.client.dto.WorkOrderApiDto;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
-import org.springframework.stereotype.Service;
 import org.springframework.util.StreamUtils;
 
 import java.io.IOException;
@@ -22,7 +21,7 @@ import java.util.stream.Collectors;
  * 负责加载和动态生成系统提示词
  */
 @Slf4j
-@Service
+//@Service
 public class SystemPromptService {
 
     private final WorkOrderExternalService workOrderExternalService;

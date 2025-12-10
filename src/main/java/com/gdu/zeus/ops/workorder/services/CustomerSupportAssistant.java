@@ -37,11 +37,19 @@ import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StreamUtils;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.Map;
@@ -63,11 +71,9 @@ public class CustomerSupportAssistant {
 
     private static final Logger logger = LoggerFactory.getLogger(CustomerSupportAssistant.class);
 
-    private final ChatClient.Builder chatClientBuilder;
-    private final ChatMemory chatMemory;
+    private final ChatClient chatClient;
     private final PatrolOrderTools patrolOrderTools;
     private final ChatService chatService;
-    private final SystemPromptService systemPromptService;
 
     private static final Map<String, Boolean> GENERATE_STATUS = new ConcurrentHashMap<>();
 
@@ -76,26 +82,71 @@ public class CustomerSupportAssistant {
                                     ChatMemory chatMemory,
                                     ChatService chatService,
                                     PatrolOrderTools patrolOrderTools,
-                                    SystemPromptService systemPromptService) {
-        this.chatClientBuilder = modelBuilder;
+                                    @Value("classpath:system-prompt.txt") Resource systemPromptResource,
+                                    @Value("${system-prompt.file-path:}") String externalPromptPath) {
         this.chatService = chatService;
         this.patrolOrderTools = patrolOrderTools;
-		this.chatMemory = chatMemory;
-        this.systemPromptService = systemPromptService;
-    }
-    /**
-     * 获取ChatClient（每次调用时使用最新的系统提示词）
-     */
-    private ChatClient getChatClient() {
-        String systemPrompt = systemPromptService.getSystemPrompt();
-        return chatClientBuilder
+        // 优先使用外部文件路径，否则使用classpath资源
+        String systemPrompt = loadSystemPrompt(externalPromptPath, systemPromptResource);
+        // @formatter:off
+        this.chatClient = modelBuilder
                 .defaultSystem(systemPrompt)
+                // 插件组合
                 .defaultAdvisors(
-                        PromptChatMemoryAdvisor.builder(chatMemory).build(),
+                        PromptChatMemoryAdvisor.builder(chatMemory).build(), // Chat Memory
+                        // new VectorStoreChatMemoryAdvisor(vectorStore)),
+                        // new QuestionAnswerAdvisor(vectorStore), // RAG
+                        // new QuestionAnswerAdvisor(vectorStore, SearchRequest.defaults()
+                        // 	.withFilterExpression("'documentType' == 'terms-of-service' && region in ['EU', 'US']")),
+                        // logger
                         new SimpleLoggerAdvisor()
                 ).build();
+        // @formatter:on
     }
 
+    /**
+     * 从配置文件加载系统提示词
+     */
+    private String loadSystemPrompt(String externalPath, Resource classpathResource) {
+        try {
+            logger.info("=== 开始加载系统提示词 ===");
+            String systemPrompt;
+            // 优先使用外部文件路径
+            if (externalPath != null && !externalPath.trim().isEmpty()) {
+                logger.info("使用外部文件路径: {}", externalPath);
+                Path path = Paths.get(externalPath);
+
+                if (Files.exists(path)) {
+                    systemPrompt = Files.readString(path, StandardCharsets.UTF_8);
+                    logger.info("从外部文件加载成功: {}", externalPath);
+                } else {
+                    logger.warn("外部文件不存在: {}, 降级使用classpath资源", externalPath);
+                    systemPrompt = loadFromClasspath(classpathResource);
+                }
+            } else {
+                // 使用classpath资源
+                logger.info("使用classpath资源");
+                systemPrompt = loadFromClasspath(classpathResource);
+            }
+            logger.info("=== 系统提示词加载成功 ===");
+            logger.info("系统提示词长度: {} 字符", systemPrompt.length());
+            logger.info("系统提示词内容:\n{}", systemPrompt);
+            logger.info("=== 系统提示词加载完成 ===");
+            return systemPrompt;
+        } catch (IOException e) {
+            logger.error("加载系统提示词失败", e);
+            throw new RuntimeException("加载系统提示词失败", e);
+        }
+    }
+
+    /**
+     * 从classpath加载资源
+     */
+    private String loadFromClasspath(Resource resource) throws IOException {
+        try (var inputStream = resource.getInputStream()) {
+            return StreamUtils.copyToString(inputStream, StandardCharsets.UTF_8);
+        }
+    }
 
     public Flux<ServerSentEvent<String>> chatWithMetadata(ChatMessageRequest request) {
         String user = Optional.ofNullable(SecurityUtils.getUser()).map(UAPUser::getUsername).orElse("unknown");
@@ -128,7 +179,6 @@ public class CustomerSupportAssistant {
                         .content(userMessageContent)
                         .build());
         // 使用最新的系统提示词构建ChatClient
-        ChatClient chatClient = getChatClient();
         Flux<String> content = chatClient.prompt()
                 .system(s -> s.param("current_date", LocalDate.now().toString()))
                 .user(userMessageContent)
@@ -253,8 +303,6 @@ public class CustomerSupportAssistant {
                 .put(TokenContext.TOKEN_KEY, token)
                 .build();
 
-        // 使用最新的系统提示词构建ChatClient
-        ChatClient chatClient = getChatClient();
         Flux<String> content = chatClient.prompt()
                 .system(s -> s.param("current_date", LocalDate.now().toString()))
                 .user(userMessageContent)
