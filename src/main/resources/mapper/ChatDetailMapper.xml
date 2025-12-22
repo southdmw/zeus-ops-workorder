@@ -6,7 +6,7 @@
     <select id="selectByChatIdAndType" resultType="com.gdu.zeus.ops.workorder.entity.ChatDetail">
         SELECT id, chat_id, conversation_id, chat_type,
                conversation_stop_flag, conversation_stop_time,
-               content, role, create_time
+               content, img_url, role, create_time
         FROM chat_detail
         WHERE chat_id = #{chatId}
           AND chat_type = #{chatType}
@@ -16,7 +16,7 @@
     <select id="selectByChatId" resultType="com.gdu.zeus.ops.workorder.entity.ChatDetail">
         SELECT id, chat_id, conversation_id, chat_type,
                conversation_stop_flag, conversation_stop_time,
-               content, role, create_time
+               content, img_url, role, create_time
         FROM chat_detail
         WHERE chat_id = #{chatId}
         ORDER BY create_time ASC
