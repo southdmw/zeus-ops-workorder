@@ -108,7 +108,8 @@ public class PatrolOrder {
             ExecutionType executionType,
             String description,
             Long orderId,
-            Integer orderType) {
+            Integer orderType,
+            String customExecutionRule) {
 
         this.orderNature = orderNature;
         this.orderName = orderName;
@@ -123,6 +124,7 @@ public class PatrolOrder {
         this.status = OrderStatus.CREATED;
         this.orderId = orderId;
         this.orderType = orderType;
+        this.customExecutionRule = customExecutionRule;
     }
 
     /**
