@@ -26,6 +26,7 @@ import java.util.stream.Collectors;
 @Service
 public class PatrolOrderTools {
     private static final DateTimeFormatter CUSTOM_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
     @Autowired
     private PatrolOrderService patrolOrderService;
     @Autowired
@@ -36,16 +37,21 @@ public class PatrolOrderTools {
     @Tool(description = "根据巡查区域获取具体POI位置列表,供用户选择。若返回空列表,需提示用户重新确定巡查区域")
     public List<POILocationInfo> getPOILocations(@ToolParam(description = "巡查区域名称") String area,
                                                  ToolContext toolContext) {
-        // 从ToolContext获取Token
-        String token = extractTokenFromContext(toolContext);
-        log.info("获取到token: {}", token);
-        TokenContext.setToken(token);
-        log.info("查询POI位置，区域: {}", area);
+        LocalDateTime startTime = LocalDateTime.now();
+        log.info("========================================");
+        log.info("=== Tool调用: getPOILocations ===");
+        log.info("调用时间: {}", startTime.format(TIME_FORMATTER));
+        log.info("输入参数: area={}", area);
         try {
+            // 从ToolContext获取Token
+            String token = extractTokenFromContext(toolContext);
+            log.info("获取到token: {}", token);
+            TokenContext.setToken(token);
             List<WorkOrderApiDto.POILocationResponse> responses = poiService.getLocationsByArea(area);
             // 检查返回是否为空
             if (responses == null || responses.isEmpty()) {
-                log.warn("未查询到巡查区域的POI位置: {}", area);
+                log.info("未查询到巡查区域的POI位置: {}", area);
+                logToolResult(startTime, "getPOILocations", 0, "空结果");
                 return Collections.emptyList();
             }
             // 转换为包含完整信息的对象
@@ -57,8 +63,8 @@ public class PatrolOrderTools {
                             poi.getAddress()
                     ))
                     .collect(Collectors.toList());
-
             log.info("查询到{}个POI位置", result.size());
+            logToolResult(startTime, "getPOILocations", result.size(), "成功");
             return result;
         } catch (Exception e) {
             log.error("查询POI位置异常,区域: {}", area, e);
@@ -69,33 +75,40 @@ public class PatrolOrderTools {
     /**
      * 根据具体位置获取可用航线
      */
-    @Tool(description = "根据具体位置获取可用航线列表,供用户选择。若返回空列表,需提示用户重新选择具体位置或重新确认巡查区域")
+    @Tool(description = "根据具体位置的经纬度坐标获取可用航线列表。参数说明：name=位置名称，x=经度，y=纬度，radius=搜索半径（米，默认2000）。若返回空列表，需提示用户重新选择位置或确认区域")
     public List<WorkOrderApiDto.RouteResponseVo> getAvailableRoutes(
-            @ToolParam(description = "具体位置名称")String name,
-            @ToolParam(description = "具体位置经度")Double x,
-            @ToolParam(description = "具体位置纬度")Double y,
+            @ToolParam(description = "具体位置名称，例如：光谷广场-1")String name,
+            @ToolParam(description = "位置经度（x坐标），例如：114.38717")Double x,
+            @ToolParam(description = "位置纬度（y坐标），例如：30.50012")Double y,
             @ToolParam(description = "搜索半径，单位：米，默认2000")Double radius,
             ToolContext toolContext) {
-        log.info("查询航线,位置: {}, 经度: {}, 纬度: {}, 半径: {}米", name, x, y, radius);
-        // 从ToolContext获取Token
-        String token = extractTokenFromContext(toolContext);
-        log.info("获取到token: {}", token);
-        TokenContext.setToken(token);
-        // 设置默认半径
-        if (radius == null || radius <= 0) {
-            radius = 2000.0;
-            log.info("使用默认搜索半径: 2000米");
-        }
+        LocalDateTime startTime = LocalDateTime.now();
+        log.info("========================================");
+        log.info("=== Tool调用: getAvailableRoutes ===");
+        log.info("调用时间: {}", startTime.format(TIME_FORMATTER));
+        log.info("输入参数: name={}, x={}, y={}, radius={}", name, x, y, radius);
         try {
+            // 从ToolContext获取Token
+            String token = extractTokenFromContext(toolContext);
+            log.info("Token提取: {}", token != null ? "成功" : "失败");
+            TokenContext.setToken(token);
+            // 设置默认半径
+            double actualRadius = (radius == null || radius <= 0) ? 2000.0 : radius;
+            if (radius == null || radius <= 0) {
+                log.info("使用默认搜索半径: 2000米");
+            }
+
             List<WorkOrderApiDto.RouteResponseVo> responses =
-                    routeService.getRoutesByLocation(name, x, y, radius);
+                    routeService.getRoutesByLocation(name, x, y, actualRadius);
             // 检查返回是否为空
             if (responses == null || responses.isEmpty()) {
-                log.warn("未查询到位置的航线: {}, 坐标: ({}, {}), 半径: {}米",
+                log.info("未查询到位置的航线: {}, 坐标: ({}, {}), 半径: {}米",
                         name, x, y, radius);
+                logToolResult(startTime, "getAvailableRoutes", 0, "空结果");
                 return Collections.emptyList();
             }
             log.info("查询到{}条航线", responses.size());
+            logToolResult(startTime, "getAvailableRoutes", responses.size(), "成功");
             return responses;
         } catch (Exception e) {
             log.error("查询航线异常,位置: {}, 坐标: ({}, {})", name, x, y, e);
@@ -118,13 +131,24 @@ public class PatrolOrderTools {
             @ToolParam(description = "巡查结果,可多选,格式:照片 或 视频 或 照片,视频")String patrolResults,      // 巡查结果（必填，可多选，逗号分隔：照片,视频）
             @ToolParam(description = "巡查目标,如:违章停车检测")String patrolTarget,       // 巡查目标
             @ToolParam(description = "工单描述,自动生成")String description,
+            @ToolParam(description = "自定义执行规则(如果选择自定义执行方式)")String customExecutionRule,
             ToolContext toolContext) {      // 工单描述（自动生成）
-        log.info("创建巡查工单: {}", orderName);
-        log.info("工单性质: {}", orderNature);
-        log.info("具体位置: {}", specificLocation);
-        log.info("执行方式: {}", executionType);
-        log.info("执行时间: {}", executionTimes);
-        log.info("巡查结果: {}", patrolResults);
+        LocalDateTime startTime = LocalDateTime.now();
+        log.info("========================================");
+        log.info("=== Tool调用: createPatrolOrder ===");
+        log.info("调用时间: {}", startTime.format(TIME_FORMATTER));
+        log.info("输入参数:");
+        log.info("  - orderNature: {}", orderNature);
+        log.info("  - orderName: {}", orderName);
+        log.info("  - patrolArea: {}", patrolArea);
+        log.info("  - specificLocation: {}", specificLocation);
+        log.info("  - routeId: {}", routeId);
+        log.info("  - executionType: {}", executionType);
+        log.info("  - customExecutionRule: {}", customExecutionRule);
+        log.info("  - executionTimes: {}", executionTimes);
+        log.info("  - patrolResults: {}", patrolResults);
+        log.info("  - patrolTarget: {}", patrolTarget);
+        log.info("  - description: {}", description);
 
         try {
             // 从ToolContext获取Token
@@ -156,12 +180,16 @@ public class PatrolOrderTools {
                     mappedExecutionType,
                     description,
                     null,
-                    null
+                    null,
+                    customExecutionRule
             );
             PatrolOrder returnOrder = patrolOrderService.createOrder(order);
             String requestId = Convert.toStr(toolContext.getContext().get("requestId"));
             ToolResultHolder.put(requestId, "orderId" , returnOrder.getOrderId());
             ToolResultHolder.put(requestId, "orderType" , order.getOrderType());
+            ToolResultHolder.put(requestId, "orderName" , order.getOrderName());
+
+            logToolResult(startTime, "createPatrolOrder", 1, "成功");
             return returnOrder;
 
         } catch (IllegalArgumentException e) {
@@ -171,6 +199,21 @@ public class PatrolOrderTools {
             log.error("创建工单异常", e);
             throw new RuntimeException("创建工单失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * 记录Tool调用结果
+     */
+    private void logToolResult(LocalDateTime startTime, String toolName, int resultCount, String status) {
+        LocalDateTime endTime = LocalDateTime.now();
+        long duration = java.time.Duration.between(startTime, endTime).toMillis();
+
+        log.info("=== Tool调用完成: {} ===", toolName);
+        log.info("完成时间: {}", endTime.format(TIME_FORMATTER));
+        log.info("耗时: {}ms", duration);
+        log.info("返回结果数量: {}", resultCount);
+        log.info("状态: {}", status);
+        log.info("========================================");
     }
 
     /**

@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -53,9 +54,8 @@ public class RouteService {
                 logger.info("从API获取航线: location={}, count={}", location, response.size());
                 return response.stream().map(r -> WorkOrderApiDto.RouteResponseVo.builder().routeId(r.getRouteId()).routeName(r.getRouteName()).build()).toList();
             } catch (Exception e) {
-                logger.error("调用航线API失败，降级到Mock数据: location={}", location, e);
-                // API调用失败时降级到Mock数据
-                return getMockRoutes(location);
+                logger.error("调用航线API失败， location={}", location, e);
+                return Collections.emptyList();
             }
         }
     }

@@ -54,9 +54,7 @@ public class POIService {
                 logger.info("从API获取POI位置: area={}, response={}", area, response.size(), response);
                 return response;
             } catch (Exception e) {
-                logger.error("调用POI API失败，降级到Mock数据: area={}", area, e);
-                // API调用失败时降级到Mock数据
-//                return getMockLocations(area);
+                logger.error("调用POI API失败， area={}", area, e);
                 return Collections.emptyList();
             }
         }

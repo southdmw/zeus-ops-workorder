@@ -1,7 +1,6 @@
 package com.gdu.zeus.ops.workorder.services;
 
 
-import com.gdu.zeus.ops.workorder.data.enums.MessageRole;
 import com.gdu.zeus.ops.workorder.dto.*;
 import com.gdu.zeus.ops.workorder.entity.Chat;
 import com.gdu.zeus.ops.workorder.entity.ChatDetail;
@@ -10,9 +9,6 @@ import com.gdu.zeus.ops.workorder.mapper.ChatMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.messages.AssistantMessage;
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -258,11 +254,10 @@ public class ChatService {
     public void saveMessage(ChatDetail detail) {
         chatDetailMapper.insert(detail);
         // 同步到ChatMemory(用于AI上下文)
-        Message aiMessage = detail.getRole() == MessageRole.USER.name()
+        /*Message aiMessage = detail.getRole() == MessageRole.USER.name()
                 ? new UserMessage(detail.getContent())
                 : new AssistantMessage(detail.getContent());
-        chatMemory.add(detail.getConversationId(), aiMessage);
-
+        chatMemory.add(detail.getConversationId(), aiMessage);*/
     }
     
 

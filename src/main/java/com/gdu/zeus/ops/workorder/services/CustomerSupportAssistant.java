@@ -19,6 +19,7 @@ package com.gdu.zeus.ops.workorder.services;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.map.MapUtil;
 import cn.hutool.core.util.IdUtil;
+import cn.hutool.core.util.StrUtil;
 import com.alibaba.fastjson.JSON;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -152,6 +153,9 @@ public class CustomerSupportAssistant {
         String user = Optional.ofNullable(SecurityUtils.getUser()).map(UAPUser::getUsername).orElse("unknown");
         Integer chatType = request.getChatType();
         String userMessageContent = request.getQuery();
+        String splittitle = StrUtil.length(userMessageContent) > 10
+                ? StrUtil.maxLength(userMessageContent, 10) + "..."
+                : userMessageContent;
         String token = TokenContext.getToken();
         // 生成请求id
         String requestId = IdUtil.fastSimpleUUID();
@@ -180,7 +184,9 @@ public class CustomerSupportAssistant {
                         .build());
         // 使用最新的系统提示词构建ChatClient
         Flux<String> content = chatClient.prompt()
-                .system(s -> s.param("current_date", LocalDate.now().toString()))
+                .system(s ->s
+                        .param("current_date", LocalDate.now().toString())
+                )
                 .user(userMessageContent)
                 .tools(patrolOrderTools)
                 .advisors(
@@ -206,13 +212,18 @@ public class CustomerSupportAssistant {
                     logger.info("Chat stream complete");
                     GENERATE_STATUS.remove(request.getConversationId());
                     if (fullResponse.length() > 0) {
+                        // 获取订单信息并构建完整的消息内容
+                        String messageContent = buildMessageWithOrderLink(
+                                fullResponse.toString(),
+                                requestId
+                        );
                         chatService.saveMessage(
                                 ChatDetail.builder()
                                         .chatId(request.getChatId())
                                         .chatType(chatType)
                                         .role(MessageRole.ASSISTANT.name())
                                         .conversationId(request.getConversationId())
-                                        .content(fullResponse.toString())
+                                        .content(messageContent)
                                         .build());
                     }
                 })
@@ -238,7 +249,7 @@ public class CustomerSupportAssistant {
         // 添加元数据事件
         ServerSentEvent<String> metadataEvent = ServerSentEvent.<String>builder()
                 .event("metadata")  // 事件类型：元数据
-                .data(buildMetadataJson(request.getConversationId(), request.getChatId(), userMessageContent))
+                .data(buildMetadataJson(request.getConversationId(), request.getChatId(), splittitle))
                 .build();
 
         ServerSentEvent<String> completeEvent = ServerSentEvent.<String>builder()
@@ -273,8 +284,41 @@ public class CustomerSupportAssistant {
         try {
             return new ObjectMapper().writeValueAsString(metadata);
         } catch (JsonProcessingException e) {
-            return "{\"error\":\"Failed to serialize metadata\"}";
+            return "{\"error\":\"failed to serialize metadata\"}";
         }
+    }
+
+    /**
+     * 构建包含订单链接的消息内容
+     *
+     * @param originalContent 原始消息内容
+     * @param requestId 请求ID
+     * @return 包含订单链接标识符的完整消息
+     */
+    private String buildMessageWithOrderLink(String originalContent, String requestId) {
+        Map<String, Object> orderInfo = ToolResultHolder.get(requestId);
+
+        if (CollUtil.isEmpty(orderInfo)) {
+            return originalContent;
+        }
+        String orderName = orderInfo.get("orderName").toString();
+        String orderId = orderInfo.get("orderId").toString();
+        String orderType = orderInfo.get("orderType").toString();
+        // 构建订单链接标识符
+        StringBuilder contentBuilder = new StringBuilder(originalContent);
+
+        // 添加换行和订单链接（使用特殊标识符）
+        contentBuilder.append("\n\n");
+
+
+        // 使用特殊标识符格式：{{ORDER_LINK:JSON数据}}
+        contentBuilder.append("[").append(orderName).append("]")
+                .append("(")
+                .append("orderId=").append(orderId)
+                .append("&orderType=").append(orderType)
+                .append(")");
+
+        return contentBuilder.toString();
     }
 
     /**
@@ -295,7 +339,7 @@ public class CustomerSupportAssistant {
 
         // 生成请求id
         String requestId = IdUtil.fastSimpleUUID();
-        String token = "cbd4dee6-33b3-4833-ba7b-884f4d22a29b";
+        String token = "c2950e3d-557e-4a99-a154-d649f4569b55";
         TokenContext.setToken(token);
         // 构建工具上下文(包含Token)
         Map<String, Object> toolContext = MapUtil.<String, Object>builder()
@@ -309,7 +353,7 @@ public class CustomerSupportAssistant {
                 .tools(patrolOrderTools)
                 .advisors(advisor -> advisor.param(CONVERSATION_ID, chatId).param(TOP_K, 100))
                 .toolContext(toolContext)
-                .options(ToolCallingChatOptions.builder().build())
+                .options(ToolCallingChatOptions.builder().temperature(0.1).build())
                 .stream()
                 .content();
         // 收集完整响应并保存

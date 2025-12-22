@@ -266,6 +266,8 @@ public class PatrolOrderService {
                 return "6";  // 空中摄影
             case SURVEYING:
                 return "7";  // 测绘
+            case OTHER:
+                return "8";  // 其他 - 新增
             default:
                 throw new IllegalArgumentException("未知的工单性质: " + orderNature);
         }
