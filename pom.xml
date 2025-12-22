@@ -8,8 +8,8 @@
 		<artifactId>gdu-zeus</artifactId>
 		<version>${revision}</version>
 	</parent>
-	<artifactId>zeus-ops-workorder</artifactId>
-	<name>zeus-ops-workorder</name>
+	<artifactId>zeus-ops-llm</artifactId>
+	<name>zeus-ops-llm</name>
 	<description>智能工单</description>
 
 	<properties>
