@@ -14,6 +14,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -86,9 +88,31 @@ public class DifyController {
      * 获取大模型复检支持算法
      */
     @Inner
+    @GetMapping("/inner/get-support-llmAlarmTypes")
+    public R getSupportAlgorithmsInner() {
+        return R.ok(difyProperties.getAlarmTypes());
+    }
+
+
+    /**
+     * 获取大模型复检支持算法
+     */
     @GetMapping("/get-support-llmAlarmTypes")
     public R getSupportAlgorithms() {
-        return R.ok(difyProperties.getAlarmTypes());
+        Map<String, String> alarmTypes = difyProperties.getAlarmTypes();
+//        Map<String, String> reversedMap = alarmTypes.entrySet().stream()
+//                .collect(Collectors.toMap(
+//                        Map.Entry::getValue,           // value 作为新的 key
+//                        Map.Entry::getKey,             // key 作为新的 value
+//                        (existing, replacement) -> existing,  // 遇到重复时保留第一个
+//                        LinkedHashMap::new             // 保持插入顺序（可选）
+//                ));
+
+        Map<String, String> reversedMap = new HashMap<>();
+        for (Map.Entry<String, String> entry : alarmTypes.entrySet()) {
+            reversedMap.putIfAbsent(entry.getValue(), entry.getKey());
+        }
+        return R.ok(reversedMap);
     }
 
 }
