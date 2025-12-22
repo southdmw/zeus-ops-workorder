@@ -65,6 +65,7 @@ spring:
       chat:
         options:
           model: Qwen3-VL-30B-A3B-Instruct-FP8
+          temperature:
 
   datasource:
     url: jdbc:mysql://172.30.0.10:30200/zeus-ops-ai?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
@@ -206,7 +207,7 @@ workorder:
     # 认证配置
     auth:
       type: BEARER  # 认证类型: NONE, BASIC, BEARER, API_KEY
-      bearer-token: a5b09181-3940-464f-bff9-f480b1bfeb75  # Bearer Token
+      bearer-token: c2950e3d-557e-4a99-a154-d649f4569b55  # Bearer Token
       # api-key: your-api-key  # API Key认证时使用
       # api-key-header: X-API-Key  # API Key Header名称
       # username: your-username  # Basic认证时使用
@@ -275,7 +276,7 @@ security:
         - /mobile/**
         - /inner/**
         - /assets/**
-        - /api/**
+        - /api/assistant/**
         - /index.html
         - /favicon.ico
         # 新增：Swagger/Knife4j文档
