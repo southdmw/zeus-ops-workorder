@@ -212,12 +212,13 @@ public class WorkOrderExternalServiceImpl implements WorkOrderExternalService {
                 log.info("创建工单成功，工单ID: {}", result.getData());
             } else {
                 log.warn("创建工单失败: {}", result != null ? result.getMsg() : "响应为空");
+                throw new RuntimeException(result.getMsg());
             }
 
             return result.getData();
         } catch (Exception e) {
             log.error("创建工单异常", e);
-            return -1L;
+            throw new RuntimeException(e);
         }
     }
 }
