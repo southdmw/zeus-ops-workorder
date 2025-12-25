@@ -5,7 +5,6 @@ spring:
   web:
     resources:
       add-mappings: true
-
   threads:
     virtual:
       enabled: true
@@ -18,27 +17,6 @@ spring:
       max-request-size: 100MB
   thymeleaf:
     cache: false
-
-  ###################
-  # Anthropic Claude 3
-  ###################
-  # ai:
-  #   anthropic:
-  #     api-key: ${ANTHROPIC_API_KEY}
-  #     chat:
-  #       options:
-  #         model: claude-3-5-sonnet-20240620
-
-  ###################
-  # Groq
-  ###################
-  # ai:
-  #   openai:
-  #     api-key: ${GROQ_API_KEY}
-  #     base-url: https://api.groq.com/openai
-  #     chat:
-  #       options:
-  #         model: llama3-70b-8192
 
   ai:
     ollama:
@@ -54,21 +32,17 @@ spring:
         enabled: false
       embedding:
         enabled: false
-#    openai:
-#      chat:
-#        enabled: false
-#      embedding:
-#        enabled: false
     openai:
       api-key: EMPTY
       base-url: http://172.16.63.81:8000
       chat:
         options:
           model: Qwen3-VL-30B-A3B-Instruct-FP8
-          temperature:
+          tool-choice: auto
+          temperature: 0.7
 
   datasource:
-    url: jdbc:mysql://172.30.0.10:30200/zeus-ops-ai?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    url: jdbc:mysql://172.30.0.10:30200/zeus-ops-ai-test?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: root
     password: 123456
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -84,117 +58,16 @@ spring:
         format_sql: true
         use_sql_comments: true
 
-###################
-# OpenAI
-###################
-# spring:
-#   ai:
-#     openai:
-#       chat:
-#         options:
-#           functions: getBookingDetails,changeBooking,cancelBooking
-#         enabled: false
-#       # Disable the OpenAI embedding when the local huggingface embedding is used
-#       embedding:
-#         enabled: false
-
-###################
-# Azure OpenAI
-###################
-# spring:
-#   ai:
-#     azure:
-#       openai:
-#         api-key: ${AZURE_OPENAI_API_KEY}
-#         endpoint: ${AZURE_OPENAI_ENDPOINT}
-#         chat:
-#           options:
-#             deployment-name: gpt-4o
-
-###################
-# Mistral AI
-###################
-# spring:
-#   ai:
-#     mistralai:
-#       api-key: ${MISTRAL_AI_API_KEY}
-#       chat:
-#         options:
-#           model: mistral-small-latest
-#           functions: getBookingDetails,changeBooking,cancelBooking
-#     retry:
-#       on-client-errors: true
-#       exclude-on-http-codes: 429
-
-###################
-# Vertex AI Gemini
-###################
-# spring:
-#   ai:
-#     vertex:
-#       ai:
-#         gemini:
-#           project-id: ${VERTEX_AI_GEMINI_PROJECT_ID}
-#           location: ${VERTEX_AI_GEMINI_LOCATION}
-#           chat:
-#             options:
-#               model: gemini-1.5-pro-001
-#               # model: gemini-1.5-flash-001
-#               transport-type: REST
-#               functions: getBookingDetails,changeBooking,cancelBooking
-
-###################
-# Milvus Vector Store
-###################
-# Change the dimensions to 384 if the local huggingface embedding is used
-# spring:
-#   ai:
-#     vectorstore:
-#       milvus:
-#         embedding-dimension: 384
-
-###################
-# PGVector
-###################
-# spring:
-#   datasource:
-#     url: jdbc:postgresql://localhost:5432/postgres
-#     username: postgres
-#     password: postgres
-
-###################
-# QDrant
-###################
-# spring:
-#   ai:
-#     vectorstore:
-#       qdrant:
-#         host: localhost
-#         port: 6334
-
-###################
-# Chroma
-###################
-# spring:
-#   ai:
-#     vectorstore:
-#       chroma:
-#         client:
-#           host: http://localhost
-#           port: 8000
-
 # 系统提示词外部文件路径配置（K8S环境使用）
 system-prompt:
   file-path: ${SYSTEM_PROMPT_FILE_PATH:}
+
 # 工单系统API配置示例
 workorder:
-  # Mock模式开关
-  # true: 使用Mock数据，不调用真实API
-  # false: 调用真实API，失败时降级到Mock数据
   mock-mode: false
   api:
     # 基础URL - 实际环境中需要替换为真实地址
-    base-url: http://172.16.64.112:30755/gdu-domp-api
+    base-url: http://172.16.64.112:31117/gdu-domp-api
 
     # 超时配置(毫秒)
     connect-timeout: 5000
@@ -207,7 +80,7 @@ workorder:
     # 认证配置
     auth:
       type: BEARER  # 认证类型: NONE, BASIC, BEARER, API_KEY
-      bearer-token: c2950e3d-557e-4a99-a154-d649f4569b55  # Bearer Token
+      bearer-token: a5b09181-3940-464f-bff9-f480b1bfeb75  # Bearer Token
       # api-key: your-api-key  # API Key认证时使用
       # api-key-header: X-API-Key  # API Key Header名称
       # username: your-username  # Basic认证时使用
@@ -234,6 +107,20 @@ dify:
   alarmTypes:
     ai_algorithm_1013: 烟雾/火点
     ai_algorithm_1014: 烟雾/火点
+    ai_algorithm_1001: 人员（地面）
+    ai_algorithm_1031: 人员（地面）
+    ai_algorithm_1010: 人员（水域）
+    ai_algorithm_1008: 生活垃圾
+    ai_algorithm_1017: 泥土渣土堆积
+    ai_algorithm_1018: 泥土渣土堆积
+    ai_algorithm_1045: 路面积水
+    ai_algorithm_1047: 特点地点拉横幅
+    ai_algorithm_1056: 非法垂钓
+    ai_algorithm_1058: 渣土车挖掘机推土机非法作业识别
+    ai_algorithm_1033: 非法售卖危化品
+    ai_algorithm_1027: 建筑垃圾
+    ai_algorithm_1019: 指定区域裸漏泥土渣土
+    ai_algorithm_1021: 房屋违建检测
 
 springdoc:
   version: '@springdoc.version@'
@@ -264,23 +151,22 @@ gdu:
 rmi:
   uap:
     log:
-      url: 172.16.64.112:30024
+      url: 172.16.64.112:31948
     upms:
-      url: 172.16.64.112:31765
+      url: 172.16.64.112:31655
     auth:
-      url: 172.16.64.112:30973
+      url: 172.16.64.112:31231
 security:
   oauth2:
     client:
       ignoreUrls:
-        - /mobile/**
-        - /inner/**
         - /assets/**
         - /api/assistant/**
+        - /api/bookings
         - /index.html
         - /favicon.ico
         # 新增：Swagger/Knife4j文档
-        - /doc.html
+        - /doc.htm
         - /swagger-ui.html
         - /swagger-ui/**
         - /v3/api-docs/**
