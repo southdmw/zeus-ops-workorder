@@ -92,6 +92,7 @@ public class CustomerSupportAssistant {
         // @formatter:off
         this.chatClient = modelBuilder
                 .defaultSystem(systemPrompt)
+                .defaultTools(patrolOrderTools)  // 显式注册工具
                 // 插件组合
                 .defaultAdvisors(
                         PromptChatMemoryAdvisor.builder(chatMemory).build(), // Chat Memory
@@ -182,13 +183,15 @@ public class CustomerSupportAssistant {
                         .conversationId(request.getConversationId())
                         .content(userMessageContent)
                         .build());
+        // 构建更强制性的提示
+        String enhancedUserMessage = buildEnhancedPrompt(userMessageContent);
         // 使用最新的系统提示词构建ChatClient
         Flux<String> content = chatClient.prompt()
                 .system(s ->s
                         .param("current_date", LocalDate.now().toString())
                 )
-                .user(userMessageContent)
-                .tools(patrolOrderTools)
+                .user(enhancedUserMessage)
+//                .tools(patrolOrderTools)
                 .advisors(
                         advisor -> advisor.param(CONVERSATION_ID, request.getConversationId()).param(TOP_K, 100))
                 .toolContext(toolContext)
@@ -256,7 +259,8 @@ public class CustomerSupportAssistant {
                 .event("complete")  // 事件类型：完成
                 .data("done")
                 .build();
-        return contentEvents
+        return Flux.just(metadataEvent) // 返回初始的元数据事件
+                .concatWith(contentEvents)  // 接着返回实际的对话内容
                 .concatWith(Flux.defer(() -> {
                     Map<String, Object> map = ToolResultHolder.get(requestId);
                             if (CollUtil.isNotEmpty(map)) {
@@ -266,9 +270,9 @@ public class CustomerSupportAssistant {
                                         .event("orderinfo")  // 事件类型：订单数据
                                         .data(JSON.toJSONString(map))
                                         .build();
-                                return Flux.just(metadataEvent, orderinfoEvent,completeEvent);
+                                return Flux.just(orderinfoEvent,completeEvent);
                             }
-                             return Flux.just(metadataEvent,completeEvent);
+                             return Flux.just(completeEvent);
                     }))
                 .onBackpressureBuffer();
     }
@@ -286,6 +290,23 @@ public class CustomerSupportAssistant {
         } catch (JsonProcessingException e) {
             return "{\"error\":\"failed to serialize metadata\"}";
         }
+    }
+
+    /**
+     * 构建增强提示,明确指导模型使用工具
+     */
+    private String buildEnhancedPrompt(String userMessage) {
+        return String.format("""
+        用户请求: %s
+        
+        重要提醒:
+        1. 如果涉及"区域"或"位置",必须调用getPOILocations工具
+        2. 如果涉及"航线",必须调用getAvailableRoutes工具
+        3. 如果要创建工单且所有信息齐全,必须调用createPatrolOrder工具
+        4. 不要假设或编造数据,必须使用工具获取真实数据
+        
+        请分析用户请求并调用相应的工具。
+        """, userMessage);
     }
 
     /**

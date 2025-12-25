@@ -27,6 +27,7 @@ import java.util.stream.Collectors;
 public class PatrolOrderTools {
     private static final DateTimeFormatter CUSTOM_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
+    private static final DateTimeFormatter ORDER_NAME_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS");
     @Autowired
     private PatrolOrderService patrolOrderService;
     @Autowired
@@ -121,8 +122,8 @@ public class PatrolOrderTools {
      */
     @Tool(description = "创建巡查工单，必须在收集完所有必填信息并获得用户明确同意后才能调用")
     public PatrolOrder createPatrolOrder(
-            @ToolParam(description = "工单性质,如:空中巡查、野外建设巡查等")String orderNature,        // 工单性质（必填）
-            @ToolParam(description = "工单名称,自动生成,格式:区域巡查-yyyyMMddHHmmss")String orderName,          // 工单名称（必填，自动生成）
+            @ToolParam(description = "工单性质,如:野外建设巡查、空中巡查、护林防火、大气探测、航空摄影、空中拍照、测绘、其他。非必填，未提供时默认为'其他'")String orderNature,        // 工单性质（必填）
+            @ToolParam(description = "工单名称,自动生成,格式:区域名称+工单性质")String orderName,          // 工单名称（必填，自动生成）
             @ToolParam(description = "巡查区域,如:光谷广场")String patrolArea,         // 巡查区域
             @ToolParam(description = "具体位置,从POI列表中用户选择的位置")String specificLocation,   // 具体位置（必填）
             @ToolParam(description = "执行航线ID,用户选择的航线对应的ID")String routeId,     // 执行航线（必填）
@@ -155,6 +156,10 @@ public class PatrolOrderTools {
             String token = extractTokenFromContext(toolContext);
             log.info("获取到token: {}", token);
             TokenContext.setToken(token);
+
+            // 生成唯一的工单名称（添加时间后缀）
+            String finalOrderName = generateUniqueOrderName(orderName);
+            log.info("生成的完整工单名称: {}", finalOrderName);
             // 映射工单性质
             OrderNature mappedOrderNature = mapOrderNature(orderNature);
 
@@ -170,7 +175,7 @@ public class PatrolOrderTools {
             // 构造工单对象
             PatrolOrder order = new PatrolOrder(
                     mappedOrderNature,
-                    orderName,
+                    finalOrderName,
                     patrolArea,
                     patrolTarget,
                     specificLocation,
@@ -199,6 +204,22 @@ public class PatrolOrderTools {
             log.error("创建工单异常", e);
             throw new RuntimeException("创建工单失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * 生成唯一的工单名称
+     * 格式：基础名称-yyyyMMddHHmmssSSS
+     *
+     * @param baseName 基础工单名称（如"光谷广场空中巡查"）
+     * @return 添加了时间后缀的唯一工单名称
+     */
+    private String generateUniqueOrderName(String baseName) {
+        if (baseName == null || baseName.trim().isEmpty()) {
+            baseName = "巡查工单";
+        }
+
+        String timestamp = LocalDateTime.now().format(ORDER_NAME_FORMATTER);
+        return baseName + "-" + timestamp;
     }
 
     /**
@@ -231,15 +252,18 @@ public class PatrolOrderTools {
      * 映射工单性质
      */
     private OrderNature mapOrderNature(String orderNature) {
+        // 如果为空或null，默认返回OTHER
         if (orderNature == null || orderNature.trim().isEmpty()) {
-            throw new IllegalArgumentException("工单性质不能为空");
+            log.info("工单性质未提供，使用默认值: OTHER");
+            return OrderNature.OTHER;
         }
 
         try {
             return OrderNature.fromDescription(orderNature.trim());
         } catch (IllegalArgumentException e) {
-            log.warn("未知的工单性质: {}", orderNature);
-            throw e;
+            // 如果无法识别，也返回OTHER
+            log.warn("未知的工单性质: {}，使用默认值: OTHER", orderNature);
+            return OrderNature.OTHER;
         }
     }
 
