@@ -187,13 +187,14 @@ public class CustomerSupportAssistant {
         String enhancedUserMessage = buildEnhancedPrompt(userMessageContent);
         // 使用最新的系统提示词构建ChatClient
         Flux<String> content = chatClient.prompt()
-                .system(s ->s
-                        .param("current_date", LocalDate.now().toString())
-                )
-                .user(enhancedUserMessage)
+                .system(s ->s.param("current_date", LocalDate.now().toString())
+                ).user(enhancedUserMessage)
 //                .tools(patrolOrderTools)
-                .advisors(
-                        advisor -> advisor.param(CONVERSATION_ID, request.getConversationId()).param(TOP_K, 100))
+                .advisors(advisor ->{
+                            String convId = request.getConversationId();
+                            logger.info("使用 conversationId 查询历史: {}", convId);
+                            advisor.param(CONVERSATION_ID, request.getConversationId()).param(TOP_K, 100);
+                        })
                 .toolContext(toolContext)
                 .options(ToolCallingChatOptions.builder().build())
                 .stream()
