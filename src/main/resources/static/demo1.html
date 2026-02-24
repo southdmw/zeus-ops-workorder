@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 智能助手</title>
+    <style>
+        /* 引入现代化的无衬线字体 */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap');
+
+        /* 基础重置 */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 2rem;
+            color: #333;
+        }
+
+        .app-container {
+            width: 100%;
+            max-width: 1200px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1), 
+                        0 1px 3px rgba(0, 0, 0, 0.05);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            animation: fadeIn 0.8s ease-out;
+        }
+
+        .header {
+            padding: 1.5rem 2rem;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            background: #ffffff;
+            z-index: 20;
+        }
+
+        .header h1 {
+            font-size: 1.4rem;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 0.4rem;
+            letter-spacing: -0.5px;
+        }
+
+        .header p {
+            font-size: 0.9rem;
+            color: #718096;
+        }
+
+        /* Iframe 包装器（设为相对定位，作为遮挡层的参考系） */
+        .iframe-wrapper {
+            width: 100%;
+            height: calc(100vh - 200px); 
+            min-height: 700px; 
+            background: #f3f4f6; /* Dify 默认的浅灰背景色 */
+            position: relative;
+        }
+
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            display: block;
+        }
+
+        /* ==========================================
+           核心修改：用于遮挡右上角 Logo 的补丁色块
+           ========================================== */
+        .dify-logo-mask {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 200px;   /* 宽度，确保能盖住 Logo */
+            height: 50px;   /* 高度，确保能盖住 Logo */
+            
+            /* 这里使用 Dify 对话界面的默认背景色。
+               如果在您的屏幕上色块有色差，请使用取色器吸取一下背景，替换这里的颜色值 */
+            background-color: #f7f9fa; 
+            
+            z-index: 10;
+            pointer-events: none; /* 鼠标穿透，避免遮挡影响其他可能的交互 */
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @media (max-width: 768px) {
+            body { padding: 0; }
+            .app-container { border-radius: 0; height: 100vh; max-width: 100%; box-shadow: none; }
+            .iframe-wrapper { height: 100%; min-height: auto; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="app-container">
+        <!-- 顶部标题 -->
+        <header class="header">
+            <h1>✨ AI 智能问数助理</h1>
+            <p>随时随地为您解答疑问，提供专业支持</p>
+        </header>
+
+        <!-- iframe 区域 -->
+        <div class="iframe-wrapper">
+            <!-- 遮挡层 -->
+            <div class="dify-logo-mask"></div>
+            
+            <iframe
+                src="http://172.30.0.10:30000/chatbot/3j18B4oBBjMQ4ifK"
+                allow="microphone">
+            </iframe>
+        </div>
+    </div>
+
+</body>
+</html>
